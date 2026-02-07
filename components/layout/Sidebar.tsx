@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { Nav } from "./Nav";
-import { Calendar } from "./Calendar";
+import { usePlayer } from "@/context/PlayerContext";
 
 type SidebarProps = { onEditCatSpace?: () => void };
 
 export function Sidebar({ onEditCatSpace }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { points } = usePlayer();
 
   return (
     <div style={{ width: 220, flexShrink: 0, position: "relative" }}>
@@ -54,8 +55,8 @@ export function Sidebar({ onEditCatSpace }: SidebarProps) {
       )}
 
       <div style={{ padding: "1rem", paddingTop: "4.5rem" }}>
-        <div className="calendar-card">
-          <Calendar />
+        <div style={{ fontSize: "0.95rem", color: "var(--text-secondary)" }}>
+          {points} pts
         </div>
       </div>
     </div>

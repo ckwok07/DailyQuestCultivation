@@ -1,17 +1,65 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { usePlayer } from "@/context/PlayerContext";
+import { getPromptForDate, DAILY_PROMPT_TASK_ID, DAILY_PROMPT_POINTS } from "@/lib/prompts";
+
+function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export function MainContent() {
-  const { isLoading } = usePlayer();
-  const [dailyPrompt, setDailyPrompt] = useState("Go on a walk");
+  const { isLoading, loadUserData } = usePlayer();
+  const today = new Date();
+  const dateKey = toDateKey(today);
+  const dailyPromptText = getPromptForDate(today);
+
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
+  const [completing, setCompleting] = useState(false);
   const [songTitle, setSongTitle] = useState("When I'm Small");
   const [songArtist, setSongArtist] = useState("Phantogram");
   const [documentTitle, setDocumentTitle] = useState("You and a friend");
-  const [editingPrompt, setEditingPrompt] = useState(false);
   const [editingSong, setEditingSong] = useState(false);
   const [editingDoc, setEditingDoc] = useState(false);
+
+  const fetchCompletions = useCallback(async () => {
+    const res = await fetch(`/api/user/completions?date=${dateKey}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const ids = new Set((data.completions ?? []).map((c: { taskId: string }) => c.taskId));
+    setCompletedTaskIds(ids);
+  }, [dateKey]);
+
+  useEffect(() => {
+    if (!isLoading) fetchCompletions();
+  }, [isLoading, fetchCompletions]);
+
+  const handleLogDaily = async () => {
+    if (completedTaskIds.has(DAILY_PROMPT_TASK_ID) || completing) return;
+    setCompleting(true);
+    try {
+      const res = await fetch("/api/user/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: DAILY_PROMPT_TASK_ID,
+          date: dateKey,
+          pointValue: DAILY_PROMPT_POINTS,
+        }),
+      });
+      if (res.ok) {
+        setCompletedTaskIds((prev) => new Set(prev).add(DAILY_PROMPT_TASK_ID));
+        await loadUserData();
+      }
+    } finally {
+      setCompleting(false);
+    }
+  };
+
+  const dailyCompleted = completedTaskIds.has(DAILY_PROMPT_TASK_ID);
 
   if (isLoading) {
     return (
@@ -27,25 +75,18 @@ export function MainContent() {
 
       <div className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p className="task-label">Daily Prompt</p>
-          {editingPrompt ? (
-            <input
-              type="text"
-              value={dailyPrompt}
-              onChange={(e) => setDailyPrompt(e.target.value)}
-              onBlur={() => setEditingPrompt(false)}
-              onKeyDown={(e) => e.key === "Enter" && setEditingPrompt(false)}
-              className="task-title"
-              style={{ width: "100%", margin: 0, padding: "0.25rem 0", border: "1px solid var(--text-secondary)", borderRadius: "var(--radius-sm)" }}
-              autoFocus
-            />
-          ) : (
-            <p className="task-title" onClick={() => setEditingPrompt(true)} style={{ cursor: "pointer", margin: 0 }}>
-              {dailyPrompt}
-            </p>
-          )}
+          <p className="task-label">Daily Prompt (+{DAILY_PROMPT_POINTS} pts)</p>
+          <p className="task-title" style={{ margin: 0 }}>
+            {dailyPromptText}
+          </p>
         </div>
-        <button type="button" className="btn">Log</button>
+        {dailyCompleted ? (
+          <span style={{ color: "var(--text-secondary)", fontSize: "0.9rem" }}>Done</span>
+        ) : (
+          <button type="button" className="btn" onClick={handleLogDaily} disabled={completing}>
+            {completing ? "…" : "Log"}
+          </button>
+        )}
       </div>
 
       <div className="card-grey" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}>
