@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Next.js / Node
+node_modules/
+.next/
+.env.local
+!.env.local.example
+# Allow project source lib (Next.js) — un-ignore so lib/ is tracked
+!lib/
+!lib/**
