@@ -19,7 +19,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from("task_completions")
-    .select("task_id, date")
+    .select("task_id, date, notes, metadata")
     .eq("user_id", user.id)
     .eq("date", date)
     .order("completed_at", { ascending: true });
@@ -32,6 +32,8 @@ export async function GET(request: Request) {
     completions: (data ?? []).map((row) => ({
       taskId: row.task_id,
       date: row.date,
+      notes: row.notes ?? undefined,
+      metadata: row.metadata ?? undefined,
     })),
   });
 }
@@ -45,25 +47,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { taskId: string; date: string; pointValue: number };
+  let body: {
+    taskId: string;
+    date: string;
+    pointValue: number;
+    notes?: string;
+    metadata?: Record<string, unknown>;
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { taskId, date, pointValue } = body;
+  const { taskId, date, pointValue, notes, metadata } = body;
   if (typeof taskId !== "string" || !taskId || typeof date !== "string" || !date) {
     return NextResponse.json({ error: "taskId and date required" }, { status: 400 });
   }
   const pointsToAdd = typeof pointValue === "number" && pointValue >= 0 ? pointValue : 0;
 
+  const insertRow: {
+    user_id: string;
+    task_id: string;
+    date: string;
+    notes?: string;
+    metadata?: Record<string, unknown>;
+  } = { user_id: user.id, task_id: taskId, date };
+  if (typeof notes === "string") insertRow.notes = notes;
+  if (metadata && typeof metadata === "object") insertRow.metadata = metadata;
+
   // Insert completion (unique on user_id, task_id, date prevents double-credit)
-  const { error: insertError } = await supabase.from("task_completions").insert({
-    user_id: user.id,
-    task_id: taskId,
-    date,
-  });
+  const { error: insertError } = await supabase.from("task_completions").insert(insertRow);
 
   if (insertError) {
     if (insertError.code === "23505") {
@@ -72,6 +86,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
+  let newPoints: number | undefined;
   if (pointsToAdd > 0) {
     const { data: stateRow, error: fetchError } = await supabase
       .from("user_state")
@@ -79,8 +94,18 @@ export async function POST(request: Request) {
       .eq("user_id", user.id)
       .single();
 
-    if (!fetchError && stateRow != null) {
-      const newPoints = (stateRow.points ?? 0) + pointsToAdd;
+    const currentPoints = !fetchError && stateRow != null ? (stateRow.points ?? 0) : 0;
+    newPoints = currentPoints + pointsToAdd;
+
+    if (fetchError && (fetchError as { code?: string }).code === "PGRST116") {
+      // No row: create user_state so points persist (e.g. user created before trigger)
+      await supabase.from("user_state").insert({
+        user_id: user.id,
+        points: newPoints,
+        streak_count: 0,
+        has_completed_onboarding: false,
+      });
+    } else if (!fetchError) {
       await supabase
         .from("user_state")
         .update({ points: newPoints, updated_at: new Date().toISOString() })
@@ -88,5 +113,5 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, points: newPoints });
 }
