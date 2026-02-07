@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import { PlayerProvider } from "@/context/PlayerContext";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Daily Quest Cultivation",
@@ -7,12 +10,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <PlayerProvider>{children}</PlayerProvider>
+      </body>
     </html>
   );
 }
