@@ -3,9 +3,12 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/layout";
 import { MainContent } from "@/components/MainContent";
+import { IsometricRoom } from "@/components/cat-space";
+import { usePlayer } from "@/context/PlayerContext";
 
 export default function Home() {
   const [catSpaceEditMode, setCatSpaceEditMode] = useState(false);
+  const { roomLayout } = usePlayer();
 
   return (
     <main style={{ display: "flex", minHeight: "100vh" }}>
@@ -28,9 +31,7 @@ export default function Home() {
           minWidth: 280,
         }}
       >
-        <div className={`cat-space-area ${catSpaceEditMode ? "edit-mode" : ""}`}>
-          {catSpaceEditMode ? "Edit cat space — place items here" : "Cat space"}
-        </div>
+        <IsometricRoom editMode={catSpaceEditMode} roomLayout={roomLayout} />
       </section>
     </main>
   );
