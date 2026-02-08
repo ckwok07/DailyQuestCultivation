@@ -111,6 +111,13 @@ export async function POST(request: Request) {
         .update({ points: newPoints, updated_at: new Date().toISOString() })
         .eq("user_id", user.id);
     }
+    // Save day snapshot for history (this day's points and current streak)
+    const { data: streakRow } = await supabase.from("user_state").select("streak_count").eq("user_id", user.id).single();
+    const streak = streakRow?.streak_count ?? 0;
+    await supabase.from("day_snapshots").upsert(
+      { user_id: user.id, date: date, points_snapshot: newPoints, streak_snapshot: streak },
+      { onConflict: "user_id,date" }
+    );
   }
 
   return NextResponse.json({ ok: true, points: newPoints });

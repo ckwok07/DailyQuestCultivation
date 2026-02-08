@@ -24,6 +24,19 @@ export async function GET() {
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // Keep today's snapshot up to date when user loads app
+  const today = new Date().toISOString().slice(0, 10);
+  await supabase.from("day_snapshots").upsert(
+    {
+      user_id: user.id,
+      date: today,
+      points_snapshot: data.points ?? 0,
+      streak_snapshot: data.streak_count ?? 0,
+    },
+    { onConflict: "user_id,date" }
+  );
+
   return NextResponse.json({
     points: data.points ?? 0,
     streakCount: data.streak_count ?? 0,
@@ -60,7 +73,7 @@ export async function PATCH(request: Request) {
     .from("user_state")
     .update(updates)
     .eq("user_id", user.id)
-    .select("user_id");
+    .select("points, streak_count");
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
@@ -80,5 +93,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
   }
+
+  // Save day snapshot for history (today's points and streak)
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: stateRow } = await supabase.from("user_state").select("points, streak_count").eq("user_id", user.id).single();
+  if (stateRow) {
+    await supabase.from("day_snapshots").upsert(
+      { user_id: user.id, date: today, points_snapshot: stateRow.points ?? 0, streak_snapshot: stateRow.streak_count ?? 0 },
+      { onConflict: "user_id,date" }
+    );
+  }
+
   return NextResponse.json({ ok: true });
 }

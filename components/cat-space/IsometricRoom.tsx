@@ -88,10 +88,9 @@ const SCALE_FAR = 0.75;
 const SCALE_NEAR = 1.25;
 
 // Movement behavior constants
-const WALK_DURATION_MIN = 2000;
-const WALK_DURATION_MAX = 5000;
-const STOP_DURATION_MIN = 500;
-const STOP_DURATION_MAX = 2000;
+/** Random idle duration (ms) after cat reaches target — then it picks a new target and walks again */
+const IDLE_DURATION_MIN = 2000;
+const IDLE_DURATION_MAX = 8000;
 const MOVEMENT_SPEED = 0.5;
 const TARGET_REACHED_THRESHOLD = 0.8;
 const MIN_TARGET_DISTANCE = 40;
@@ -258,67 +257,38 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
   const [catFloor, setCatFloor] = useState<{ x: number; z: number }>({ x: 0, z: 0 });
   const [isWalking, setIsWalking] = useState(true);
   const [catSpeed, setCatSpeed] = useState(0);
-  
+  const [faceRight, setFaceRight] = useState(true);
+
   const targetRef = useRef({ x: 0, z: 0 });
   const hasTargetRef = useRef(false);
   const animationFrameRef = useRef<number | undefined>(undefined);
-  const behaviorTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
-  const behaviorModeRef = useRef<'always-walk' | 'walk-stop'>('always-walk');
+  const idleTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const catFloorRef = useRef({ x: 0, z: 0 });
 
   const pickNewTarget = useCallback((currentX: number, currentZ: number) => {
     let attempts = 0;
     let target;
-    
     const pickBorderPoint = Math.random() < 0.6;
-    
     do {
-      target = pickBorderPoint 
+      target = pickBorderPoint
         ? randomPointOnBorder(FLOOR_HALF)
         : randomPointBiasedToEdges(FLOOR_HALF);
-        
       const dx = target.x - currentX;
       const dz = target.z - currentZ;
       const distance = Math.sqrt(dx * dx + dz * dz);
-      
-      if (distance > MIN_TARGET_DISTANCE) {
-        break;
-      }
+      if (distance > MIN_TARGET_DISTANCE) break;
       attempts++;
     } while (attempts < 20);
-    
     return target || randomPointBiasedToEdges(FLOOR_HALF);
   }, []);
 
-  const scheduleNextBehavior = useCallback(() => {
-    if (behaviorTimeoutRef.current) {
-      clearTimeout(behaviorTimeoutRef.current);
-    }
-
-    if (!behaviorModeRef.current || Math.random() < 0.3) {
-      behaviorModeRef.current = Math.random() < 0.7 ? 'always-walk' : 'walk-stop';
-    }
-    
-    if (behaviorModeRef.current === 'always-walk') {
-      setIsWalking(true);
-      const duration = randomBetween(WALK_DURATION_MIN * 2, WALK_DURATION_MAX * 2);
-      behaviorTimeoutRef.current = setTimeout(() => {
-        scheduleNextBehavior();
-      }, duration);
-    } else {
-      setIsWalking((current) => {
-        const nextState = Math.random() < 0.17;
-        const duration = nextState 
-          ? randomBetween(WALK_DURATION_MIN, WALK_DURATION_MAX)
-          : randomBetween(STOP_DURATION_MIN, STOP_DURATION_MAX);
-        
-        behaviorTimeoutRef.current = setTimeout(() => {
-          scheduleNextBehavior();
-        }, duration);
-        
-        return nextState;
-      });
-    }
-  }, []);
+  const startWalking = useCallback(() => {
+    const { x, z } = catFloorRef.current;
+    const newTarget = pickNewTarget(x, z);
+    targetRef.current = newTarget;
+    hasTargetRef.current = true;
+    setIsWalking(true);
+  }, [pickNewTarget]);
 
   useEffect(() => {
     const animate = () => {
@@ -326,6 +296,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         setCatFloor((prev) => {
           const currentX = prev.x;
           const currentZ = prev.z;
+          catFloorRef.current = { x: currentX, z: currentZ };
 
           if (!hasTargetRef.current) {
             const newTarget = pickNewTarget(currentX, currentZ);
@@ -340,12 +311,18 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
           if (distance < TARGET_REACHED_THRESHOLD) {
             hasTargetRef.current = false;
             setCatSpeed(0);
+            setIsWalking(false);
+            const idleMs = randomBetween(IDLE_DURATION_MIN, IDLE_DURATION_MAX);
+            if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
+            idleTimeoutRef.current = setTimeout(() => {
+              idleTimeoutRef.current = undefined;
+              startWalking();
+            }, idleMs);
             return prev;
           }
 
           const moveX = (dx / distance) * MOVEMENT_SPEED;
           const moveZ = (dz / distance) * MOVEMENT_SPEED;
-
           let nextX: number;
           let nextZ: number;
           if (distance < MOVEMENT_SPEED) {
@@ -356,39 +333,34 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
             setCatSpeed(MOVEMENT_SPEED);
             nextX = currentX + moveX;
             nextZ = currentZ + moveZ;
+            const horiz = dx - dz;
+            const faceRightNext = horiz !== 0 ? horiz > 0 : currentX >= currentZ;
+            setFaceRight(faceRightNext);
           }
-
           return clampToFloorSquare(nextX, nextZ, FLOOR_HALF);
         });
       } else {
         setCatSpeed(0);
       }
-
       animationFrameRef.current = requestAnimationFrame(animate);
     };
-  
+
     animationFrameRef.current = requestAnimationFrame(animate);
-  
     return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [isWalking, pickNewTarget]);
+  }, [isWalking, pickNewTarget, startWalking]);
 
   useEffect(() => {
     const initial = randomPointBiasedToEdges(FLOOR_HALF);
     setCatFloor(initial);
+    catFloorRef.current = initial;
     hasTargetRef.current = false;
-    
-    scheduleNextBehavior();
-
+    startWalking();
     return () => {
-      if (behaviorTimeoutRef.current) {
-        clearTimeout(behaviorTimeoutRef.current);
-      }
+      if (idleTimeoutRef.current) clearTimeout(idleTimeoutRef.current);
     };
-  }, [scheduleNextBehavior]);
+  }, [startWalking]);
 
   const clamp = (v: number, min: number, max: number) =>
     Math.max(min, Math.min(max, v));
@@ -852,6 +824,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               screenY={y}
               scale={scale}
               isWalking={useWalkingSprite}
+              faceRight={faceRight}
             />
           );
         })()}

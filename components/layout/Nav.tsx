@@ -6,9 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 type NavProps = {
   onNavigate?: () => void;
   onEditCatSpace?: () => void;
+  onOpenHistory?: () => void;
 };
 
-export function Nav({ onNavigate, onEditCatSpace }: NavProps) {
+export function Nav({ onNavigate, onEditCatSpace, onOpenHistory }: NavProps) {
   const router = useRouter();
 
   async function handleLogout() {
@@ -27,6 +28,14 @@ export function Nav({ onNavigate, onEditCatSpace }: NavProps) {
         onClick={() => { onEditCatSpace?.(); onNavigate?.(); }}
       >
         Edit cat space
+      </button>
+      <button
+        type="button"
+        className="btn"
+        style={{ alignSelf: "flex-start", textAlign: "left" }}
+        onClick={() => { onOpenHistory?.(); onNavigate?.(); }}
+      >
+        History
       </button>
       <button type="button" onClick={handleLogout} className="btn" style={{ alignSelf: "flex-start" }}>
         Log out

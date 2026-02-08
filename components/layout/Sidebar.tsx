@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Nav } from "./Nav";
 import { ShopPanel } from "./ShopPanel";
+import { HistoryPanel } from "./HistoryPanel";
 import { usePlayer } from "@/context/PlayerContext";
 
 type SidebarProps = { onEditCatSpace?: () => void };
@@ -10,6 +11,7 @@ type SidebarProps = { onEditCatSpace?: () => void };
 export function Sidebar({ onEditCatSpace }: SidebarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { points } = usePlayer();
 
   return (
@@ -82,7 +84,11 @@ export function Sidebar({ onEditCatSpace }: SidebarProps) {
               background: "var(--bg-page)",
             }}
           >
-            <Nav onNavigate={() => setMenuOpen(false)} onEditCatSpace={onEditCatSpace} />
+            <Nav
+            onNavigate={() => setMenuOpen(false)}
+            onEditCatSpace={onEditCatSpace}
+            onOpenHistory={() => { setMenuOpen(false); setHistoryOpen(true); }}
+          />
           </aside>
         </>
       )}
@@ -99,6 +105,10 @@ export function Sidebar({ onEditCatSpace }: SidebarProps) {
           />
           <ShopPanel onClose={() => setShopOpen(false)} />
         </>
+      )}
+
+      {historyOpen && (
+        <HistoryPanel onClose={() => setHistoryOpen(false)} />
       )}
 
       <div style={{ padding: "1rem", paddingTop: "4.5rem" }}>
