@@ -17,8 +17,8 @@ export async function GET() {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  const itemIds = (data ?? []).map((row) => row.item_id);
-  return NextResponse.json(itemIds);
+  const list = (data ?? []).map((row) => row.item_id);
+  return NextResponse.json(list);
 }
 
 export async function POST(request: Request) {
@@ -37,10 +37,7 @@ export async function POST(request: Request) {
   }
   const itemId = body.itemId;
   if (typeof itemId !== "string" || !itemId.trim()) {
-    return NextResponse.json(
-      { error: "itemId is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "itemId is required" }, { status: 400 });
   }
   const { error: insertError } = await supabase.from("owned_items").insert({
     user_id: user.id,
@@ -49,16 +46,14 @@ export async function POST(request: Request) {
   if (insertError) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
-  const { data: list, error: selectError } = await supabase
+  const { data, error: fetchError } = await supabase
     .from("owned_items")
     .select("item_id")
     .eq("user_id", user.id)
     .order("purchased_at", { ascending: true });
-  if (selectError) {
-    return NextResponse.json({ error: selectError.message }, { status: 500 });
+  if (fetchError) {
+    return NextResponse.json({ error: fetchError.message }, { status: 500 });
   }
-  return NextResponse.json(
-    (list ?? []).map((row) => row.item_id),
-    { status: 201 }
-  );
+  const list = (data ?? []).map((row) => row.item_id);
+  return NextResponse.json(list);
 }

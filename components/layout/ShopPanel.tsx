@@ -19,6 +19,7 @@ type ShopItemDef = {
 const FURNITURE_ITEMS: ShopItemDef[] = [
   { id: "cat-portrait", name: "Cat portrait", price: 50, category: "furniture" },
   { id: "couch", name: "Couch", price: 80, category: "furniture" },
+  { id: "poster", name: "Poster", price: 40, category: "furniture" },
 ];
 const COSMETIC_ITEMS: ShopItemDef[] = [
   { id: "angel-wings", name: "Angel wings", price: 75, category: "cosmetics" },
@@ -59,6 +60,34 @@ function CatPortraitIcon() {
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       </div>
+    </div>
+  );
+}
+
+/** Furniture icon: poster */
+function PosterIcon() {
+  return (
+    <div
+      style={{
+        width: 56,
+        height: 56,
+        flexShrink: 0,
+        borderRadius: 8,
+        padding: 5,
+        background: "linear-gradient(180deg, #e2ddd4 0%, #d4cfc6 100%)",
+        boxShadow:
+          "inset 0 0 0 1px rgba(255,255,255,0.5), inset 0 1px 0 2px rgba(255,255,255,0.4), 0 2px 6px rgba(0,0,0,0.12)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+    >
+      <img
+        src="/resources/poster.png"
+        alt=""
+        style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 4 }}
+      />
     </div>
   );
 }
@@ -108,6 +137,8 @@ function renderItemIcon(itemId: string) {
       return <CatPortraitIcon />;
     case "couch":
       return <CouchIcon />;
+    case "poster":
+      return <PosterIcon />;
     case "angel-wings":
       return <AngelWingIcon />;
     default:

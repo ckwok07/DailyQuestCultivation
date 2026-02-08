@@ -12,18 +12,45 @@ const COUCH_ICON =
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><rect x="4" y="12" width="56" height="14" rx="2" fill="%236b5344" stroke="%234a3728" stroke-width="1"/><rect x="4" y="8" width="8" height="6" fill="%236b5344" stroke="%234a3728" stroke-width="1"/><rect x="52" y="8" width="8" height="6" fill="%236b5344" stroke="%234a3728" stroke-width="1"/></svg>'
   );
 
-const FURNITURE_PLACEABLE: { id: string; name: string; icon: string }[] = [
+const FURNITURE_PLACEABLE: { id: string; name: string; icon: string; wallOnly?: boolean }[] = [
   { id: "cat-portrait", name: "Cat portrait", icon: "/resources/cat-static.png" },
   { id: "couch", name: "Couch", icon: COUCH_ICON },
+  { id: "poster", name: "Poster", icon: "/resources/poster.png", wallOnly: true },
 ];
 
+function getFurnitureById(id: string): { id: string; name: string; icon: string; wallOnly?: boolean } | undefined {
+  return FURNITURE_PLACEABLE.find((f) => f.id === id);
+}
+
+function canPlaceItemOnLayer(itemId: string, layer: "floor" | "wall"): boolean {
+  const meta = getFurnitureById(itemId);
+  if (!meta) return false;
+  if (meta.wallOnly && layer === "floor") return false;
+  return true;
+}
+
+/** Parse wallAnchorId e.g. "wall-left-1-2" -> { wall: 'left', row: 1, col: 2 } */
+function parseWallAnchorId(
+  wallAnchorId: string
+): { wall: "left" | "right"; row: number; col: number } | null {
+  const match = wallAnchorId.match(/^wall-(left|right)-(\d+)-(\d+)$/);
+  if (!match) return null;
+  return {
+    wall: match[1] as "left" | "right",
+    row: parseInt(match[2], 10),
+    col: parseInt(match[3], 10),
+  };
+}
+
 const CUBE_SIZE = 256;
+/** Z depth for floor and both walls so they share the same plane and align. */
+const FLOOR_WALL_Z = CUBE_SIZE / 2;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 2;
 const PAN_LIMIT = 120;
 
 /** Cat walkable area = red overlay = full floor face. Same bounds everywhere. */
-const FLOOR_HALF = CUBE_SIZE / 2; // ±this in floor x,z = red overlay extent
+const FLOOR_HALF = CUBE_SIZE / 2 * 1.4;
 
 /** Floor placement grid: every cell is a hitbox for one item */
 const FLOOR_GRID_COLS = 8;
@@ -33,14 +60,12 @@ const FLOOR_GRID_ROWS = 8;
 const WALL_GRID_COLS = 4;
 const WALL_GRID_ROWS = 4;
 
-/** Floor cell center in floor space (x, z) for a given grid (col, row) */
-function floorCellCenter(col: number, row: number): { x: number; z: number } {
-  const step = (2 * FLOOR_HALF) / FLOOR_GRID_COLS;
-  return {
-    x: -FLOOR_HALF + (col + 0.5) * step,
-    z: -FLOOR_HALF + (row + 0.5) * step,
-  };
-}
+const FLOOR_CELL_SIZE = CUBE_SIZE / FLOOR_GRID_COLS;
+const WALL_CELL_SIZE = CUBE_SIZE / WALL_GRID_COLS;
+/** Size of placed furniture on floor (slightly smaller than cell) */
+const FLOOR_ITEM_SIZE = Math.floor(FLOOR_CELL_SIZE * 0.85);
+/** Size of placed furniture on walls */
+const WALL_ITEM_SIZE = Math.floor(WALL_CELL_SIZE * 0.85);
 
 /** All wall anchor IDs for left wall then right wall (for placement/API) */
 export const WALL_ANCHOR_IDS: string[] = [
@@ -68,7 +93,7 @@ const WALK_DURATION_MAX = 5000;
 const STOP_DURATION_MIN = 500;
 const STOP_DURATION_MAX = 2000;
 const MOVEMENT_SPEED = 0.5;
-const TARGET_REACHED_THRESHOLD = 0.8; // stop when almost at target so cat reaches border
+const TARGET_REACHED_THRESHOLD = 0.8;
 const MIN_TARGET_DISTANCE = 40;
 /** Speed below this → show static cat; at or above → walking.gif */
 const WALK_SPEED_THRESHOLD = 0.2;
@@ -148,13 +173,24 @@ type IsometricRoomProps = {
 export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps) {
   const { ownedItems, setRoomLayout } = usePlayer();
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
+  /** Index into roomLayout of the placed item selected for move/remove (edit mode) */
+  const [selectedPlacedIndex, setSelectedPlacedIndex] = useState<number | null>(null);
+
+  const [dragOverCell, setDragOverCell] = useState<{ wall: string; row: number; col: number } | null>(null);
+
   const [scale, setScale] = useState(1);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
+  /** Cursor position for furniture ghost preview (edit mode, when placing) */
+  const [previewCursor, setPreviewCursor] = useState<{ x: number; y: number } | null>(null);
 
-  const ownedFurniture = FURNITURE_PLACEABLE.filter((f) => ownedItems.includes(f.id));
+  const getOwnedCount = useCallback((itemId: string) => ownedItems.filter((id) => id === itemId).length, [ownedItems]);
+  const getPlacedCount = useCallback((itemId: string) => roomLayout.filter((i) => i.itemId === itemId).length, [roomLayout]);
+  const canPlaceMore = useCallback((itemId: string) => getPlacedCount(itemId) < getOwnedCount(itemId), [getPlacedCount, getOwnedCount]);
+
+  const ownedFurniture = FURNITURE_PLACEABLE.filter((f) => getOwnedCount(f.id) > 0);
 
   const saveRoomLayout = useCallback(
     async (layout: RoomLayoutItem[]) => {
@@ -171,13 +207,50 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     [setRoomLayout]
   );
 
+  const isPositionOccupied = useCallback(
+    (position: RoomLayoutItem["position"], layer: "floor" | "wall", excludeLayoutIndex: number | null) => {
+      return roomLayout.some((item, i) => {
+        if (i === excludeLayoutIndex) return false;
+        if (item.layer !== layer) return false;
+        if (layer === "floor" && "x" in position && "x" in item.position)
+          return item.position.x === position.x && item.position.y === position.y;
+        if (layer === "wall" && "wallAnchorId" in position && "wallAnchorId" in item.position)
+          return item.position.wallAnchorId === position.wallAnchorId;
+        return false;
+      });
+    },
+    [roomLayout]
+  );
+
   const placeItem = useCallback(
     (itemId: string, position: RoomLayoutItem["position"], layer: "floor" | "wall") => {
+      if (selectedPlacedIndex !== null) {
+        const item = roomLayout[selectedPlacedIndex];
+        if (!item) return;
+        if (isPositionOccupied(position, layer, selectedPlacedIndex)) return;
+        const newLayout = roomLayout.map((it, i) =>
+          i === selectedPlacedIndex ? { ...it, position, layer } : it
+        );
+        saveRoomLayout(newLayout);
+        setSelectedPlacedIndex(null);
+        return;
+      }
+      if (!canPlaceMore(itemId)) return;
+      if (isPositionOccupied(position, layer, null)) return;
       const newLayout: RoomLayoutItem[] = [
         ...roomLayout,
         { itemId, position, rotation: 0, layer },
       ];
       saveRoomLayout(newLayout);
+    },
+    [roomLayout, saveRoomLayout, selectedPlacedIndex, canPlaceMore, isPositionOccupied]
+  );
+
+  const removePlacedItem = useCallback(
+    (layoutIndex: number) => {
+      const newLayout = roomLayout.filter((_, i) => i !== layoutIndex);
+      saveRoomLayout(newLayout);
+      setSelectedPlacedIndex(null);
     },
     [roomLayout, saveRoomLayout]
   );
@@ -192,15 +265,12 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
   const behaviorTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const behaviorModeRef = useRef<'always-walk' | 'walk-stop'>('always-walk');
 
-  // Pick a new target that's different from current position
   const pickNewTarget = useCallback((currentX: number, currentZ: number) => {
     let attempts = 0;
     let target;
     
-    // Often pick a point on the border so the cat walks all the way to the edge
     const pickBorderPoint = Math.random() < 0.6;
     
-    // Keep trying until we get a target that's reasonably far from current position
     do {
       target = pickBorderPoint 
         ? randomPointOnBorder(FLOOR_HALF)
@@ -210,7 +280,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       const dz = target.z - currentZ;
       const distance = Math.sqrt(dx * dx + dz * dz);
       
-      // Ensure new target is far enough for good coverage
       if (distance > MIN_TARGET_DISTANCE) {
         break;
       }
@@ -220,13 +289,11 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     return target || randomPointBiasedToEdges(FLOOR_HALF);
   }, []);
 
-  // Schedule next behavior change (walk or stop)
   const scheduleNextBehavior = useCallback(() => {
     if (behaviorTimeoutRef.current) {
       clearTimeout(behaviorTimeoutRef.current);
     }
 
-    // Randomly decide behavior mode at the start (bias toward walking so walking.gif shows)
     if (!behaviorModeRef.current || Math.random() < 0.3) {
       behaviorModeRef.current = Math.random() < 0.7 ? 'always-walk' : 'walk-stop';
     }
@@ -239,7 +306,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       }, duration);
     } else {
       setIsWalking((current) => {
-        // ~83% idle, ~17% walking in walk-stop mode (adds ~10% overall idle chance)
         const nextState = Math.random() < 0.17;
         const duration = nextState 
           ? randomBetween(WALK_DURATION_MIN, WALK_DURATION_MAX)
@@ -254,7 +320,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     }
   }, []);
 
-  // Animation loop - smooth movement (position clamped to diamond so cat stays on visible floor)
   useEffect(() => {
     const animate = () => {
       if (isWalking) {
@@ -293,7 +358,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
             nextZ = currentZ + moveZ;
           }
 
-          return clampToFloorSquare(nextX, nextZ, FLOOR_HALF); // same as red overlay
+          return clampToFloorSquare(nextX, nextZ, FLOOR_HALF);
         });
       } else {
         setCatSpeed(0);
@@ -311,7 +376,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     };
   }, [isWalking, pickNewTarget]);
 
-  // Initialize position and behavior
   useEffect(() => {
     const initial = randomPointBiasedToEdges(FLOOR_HALF);
     setCatFloor(initial);
@@ -331,20 +395,28 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
+      if (editMode) return;
       e.preventDefault();
       const delta = e.deltaY > 0 ? -0.1 : 0.1;
       setScale((s) => clamp(s + delta, MIN_SCALE, MAX_SCALE));
     },
-    []
+    [editMode]
   );
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    setIsDragging(true);
-    lastMouseRef.current = { x: e.clientX, y: e.clientY };
-  }, []);
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (editMode) return;
+      setIsDragging(true);
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    },
+    [editMode]
+  );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
+      if (editMode && selectedFurnitureId && selectedPlacedIndex === null) {
+        setPreviewCursor({ x: e.clientX, y: e.clientY });
+      }
       if (!isDragging) return;
       const dx = e.clientX - lastMouseRef.current.x;
       const dy = e.clientY - lastMouseRef.current.y;
@@ -352,41 +424,28 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       setOffsetX((x) => clamp(x + dx, -PAN_LIMIT, PAN_LIMIT));
       setOffsetY((y) => clamp(y + dy, -PAN_LIMIT, PAN_LIMIT));
     },
-    [isDragging]
+    [isDragging, editMode, selectedFurnitureId, selectedPlacedIndex]
   );
 
-  const handleMouseLeave = useCallback(() => setIsDragging(false), []);
-
-  const handlePlaceOverlayClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!selectedFurnitureId) return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      const relX = (e.clientX - rect.left) / rect.width;
-      const relY = (e.clientY - rect.top) / rect.height;
-      if (relX < 0.35) {
-        const u = relX / 0.35;
-        const v = relY;
-        const col = Math.min(WALL_GRID_COLS - 1, Math.max(0, Math.floor(u * WALL_GRID_COLS)));
-        const row = Math.min(WALL_GRID_ROWS - 1, Math.max(0, Math.floor(v * WALL_GRID_ROWS)));
-        placeItem(selectedFurnitureId, { wallAnchorId: `wall-left-${row}-${col}` }, "wall");
-      } else if (relX > 0.65) {
-        const u = (relX - 0.65) / 0.35;
-        const v = relY;
-        const col = Math.min(WALL_GRID_COLS - 1, Math.max(0, Math.floor(u * WALL_GRID_COLS)));
-        const row = Math.min(WALL_GRID_ROWS - 1, Math.max(0, Math.floor(v * WALL_GRID_ROWS)));
-        placeItem(selectedFurnitureId, { wallAnchorId: `wall-right-${row}-${col}` }, "wall");
-      } else {
-        const u = (relX - 0.35) / 0.3;
-        const v = relY;
-        const col = Math.min(FLOOR_GRID_COLS - 1, Math.max(0, Math.floor(u * FLOOR_GRID_COLS)));
-        const row = Math.min(FLOOR_GRID_ROWS - 1, Math.max(0, Math.floor(v * FLOOR_GRID_ROWS)));
-        placeItem(selectedFurnitureId, { x: col, y: row }, "floor");
-      }
-    },
-    [selectedFurnitureId, placeItem]
-  );
+  const handleMouseLeave = useCallback(() => {
+    setIsDragging(false);
+    setPreviewCursor(null);
+  }, []);
 
   const handleMouseUp = useCallback(() => setIsDragging(false), []);
+
+  useEffect(() => {
+    if (!editMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedFurnitureId(null);
+        setSelectedPlacedIndex(null);
+        setPreviewCursor(null);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [editMode]);
 
   return (
     <div
@@ -401,37 +460,54 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         padding: "1rem",
         position: "relative",
         userSelect: "none",
-        cursor: isDragging ? "grabbing" : "grab",
+        cursor: editMode ? "default" : isDragging ? "grabbing" : "grab",
       }}
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
+      onMouseEnter={(e) => {
+        if (editMode && selectedFurnitureId && selectedPlacedIndex === null) {
+          setPreviewCursor({ x: e.clientX, y: e.clientY });
+        }
+      }}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
       onContextMenu={(e) => e.preventDefault()}
     >
-      {editMode && selectedFurnitureId && (
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="Click to place furniture on wall or floor"
-          style={{
-            position: "absolute",
-            inset: 0,
-            zIndex: 5,
-            pointerEvents: "auto",
-            cursor: "pointer",
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            handlePlaceOverlayClick(e);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") e.preventDefault();
-          }}
-        />
-      )}
+      {/* Ghost preview */}
+      {editMode && selectedFurnitureId && selectedPlacedIndex === null && previewCursor && (() => {
+        const meta = getFurnitureById(selectedFurnitureId);
+        if (!meta) return null;
+        return (
+          <div
+            aria-hidden
+            style={{
+              position: "fixed",
+              left: previewCursor.x,
+              top: previewCursor.y,
+              transform: "translate(-50%, -50%)",
+              width: 56,
+              height: 56,
+              pointerEvents: "none",
+              zIndex: 15,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <img
+              src={meta.icon}
+              alt=""
+              style={{
+                width: 48,
+                height: 48,
+                objectFit: "contain",
+                opacity: 0.5,
+              }}
+            />
+          </div>
+        );
+      })()}
       <div
         style={{
           display: "flex",
@@ -460,6 +536,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               transform: "rotateX(-35deg) rotateY(45deg)",
             }}
           >
+            {/* Floor */}
             <div
               style={{
                 position: "absolute",
@@ -467,137 +544,89 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
                 height: CUBE_SIZE,
                 backgroundImage: "url(/resources/floor.png)",
                 backgroundSize: "cover",
-                transform: `rotateX(90deg) translateZ(-${CUBE_SIZE / 2}px)`,
+                transform: `rotateX(90deg) translateZ(-${FLOOR_WALL_Z}px)`,
                 transformOrigin: "center center",
               }}
               aria-hidden
             />
-            {/* Floor grid: every cell is a hitbox for placement (edit mode) */}
-            {editMode && (
-              <div
-                style={{
-                  position: "absolute",
-                  width: CUBE_SIZE,
-                  height: CUBE_SIZE,
-                  transform: `rotateX(90deg) translateZ(-${CUBE_SIZE / 2}px)`,
-                  transformOrigin: "center center",
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${FLOOR_GRID_COLS}, 1fr)`,
-                  gridTemplateRows: `repeat(${FLOOR_GRID_ROWS}, 1fr)`,
-                  pointerEvents: "auto",
-                }}
-                aria-hidden
-              >
-                {Array.from({ length: FLOOR_GRID_ROWS * FLOOR_GRID_COLS }, (_, i) => {
-                  const row = Math.floor(i / FLOOR_GRID_COLS);
-                  const col = i % FLOOR_GRID_COLS;
-                  return (
-                    <div
-                      key={`floor-${row}-${col}`}
-                      role="button"
-                      tabIndex={0}
-                      data-floor-cell-id={`floor-${row}-${col}`}
-                      data-floor-col={col}
-                      data-floor-row={row}
-                      style={{
-                        border: "1px solid rgba(255,255,255,0.35)",
-                        boxSizing: "border-box",
-                        cursor: selectedFurnitureId ? "pointer" : "default",
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (selectedFurnitureId) {
-                          placeItem(
-                            selectedFurnitureId,
-                            { x: col, y: row },
-                            "floor"
-                          );
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (selectedFurnitureId && (e.key === "Enter" || e.key === " ")) {
-                          e.preventDefault();
-                          placeItem(selectedFurnitureId, { x: col, y: row }, "floor");
-                        }
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            
+            {/* Floor grid cells and items */}
             <div
               style={{
                 position: "absolute",
                 width: CUBE_SIZE,
                 height: CUBE_SIZE,
-                backgroundImage: "url(/resources/wall-left.png)",
-                backgroundSize: "cover",
-                transform: `rotateY(90deg) translateZ(${CUBE_SIZE / 2}px)`,
+                transform: `rotateX(90deg) translateZ(-${FLOOR_WALL_Z}px)`,
                 transformOrigin: "center center",
+                pointerEvents: editMode ? "auto" : "none",
+                display: "grid",
+                gridTemplateColumns: `repeat(${FLOOR_GRID_COLS}, 1fr)`,
+                gridTemplateRows: `repeat(${FLOOR_GRID_ROWS}, 1fr)`,
               }}
               aria-hidden
             >
-              {/* Wall-left: visual grid (no pointer events) + full-size drop zone — click anywhere, snap to nearest cell */}
-              {editMode && (
-                <>
+              {Array.from({ length: FLOOR_GRID_ROWS * FLOOR_GRID_COLS }, (_, i) => {
+                const row = Math.floor(i / FLOOR_GRID_COLS);
+                const col = i % FLOOR_GRID_COLS;
+                const placedItem = roomLayout.find(
+                  (item) => item.layer === "floor" && "x" in item.position && item.position.x === col && item.position.y === row
+                );
+                const layoutIndex = placedItem ? roomLayout.indexOf(placedItem) : null;
+                const meta = placedItem ? getFurnitureById(placedItem.itemId) : null;
+                const isSelected = editMode && layoutIndex !== null && selectedPlacedIndex === layoutIndex;
+
+                return (
                   <div
+                    key={`floor-${row}-${col}`}
                     style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "grid",
-                      gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
-                      gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
-                      pointerEvents: "none",
-                      transform: "translateZ(1px)",
-                      border: "1px solid rgba(255,255,255,0.35)",
+                      position: "relative",
+                      border: editMode ? "1px solid rgba(255,255,255,0.25)" : "none",
                       boxSizing: "border-box",
+                      cursor: editMode ? "pointer" : "default",
                     }}
-                    aria-hidden
-                  >
-                    {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.4)",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Place furniture on left wall"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      pointerEvents: selectedFurnitureId ? "auto" : "none",
-                      cursor: selectedFurnitureId ? "pointer" : "default",
-                      transform: "translateZ(20px)",
-                      transformStyle: "preserve-3d",
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
+                    onClick={editMode ? (e) => {
                       e.stopPropagation();
-                      if (!selectedFurnitureId) return;
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const u = (e.clientX - rect.left) / rect.width;
-                      const v = (e.clientY - rect.top) / rect.height;
-                      const col = Math.min(WALL_GRID_COLS - 1, Math.max(0, Math.floor(u * WALL_GRID_COLS)));
-                      const row = Math.min(WALL_GRID_ROWS - 1, Math.max(0, Math.floor(v * WALL_GRID_ROWS)));
-                      placeItem(selectedFurnitureId, { wallAnchorId: `wall-left-${row}-${col}` }, "wall");
-                    }}
-                    onKeyDown={(e) => {
-                      if (selectedFurnitureId && (e.key === "Enter" || e.key === " ")) {
-                        e.preventDefault();
-                        placeItem(selectedFurnitureId, { wallAnchorId: "wall-left-0-0" }, "wall");
+                      if (layoutIndex !== null) {
+                        setSelectedPlacedIndex(layoutIndex);
+                        setSelectedFurnitureId(null);
+                      } else if (selectedPlacedIndex !== null) {
+                        const item = roomLayout[selectedPlacedIndex];
+                        if (item && canPlaceItemOnLayer(item.itemId, "floor")) placeItem(item.itemId, { x: col, y: row }, "floor");
+                      } else if (selectedFurnitureId && canPlaceMore(selectedFurnitureId) && canPlaceItemOnLayer(selectedFurnitureId, "floor")) {
+                        placeItem(selectedFurnitureId, { x: col, y: row }, "floor");
                       }
-                    }}
-                  />
-                </>
-              )}
+                    } : undefined}
+                  >
+                    {meta && (
+                      <div
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          outline: isSelected ? "2px solid white" : "none",
+                          outlineOffset: 2,
+                        }}
+                      >
+                        <img
+                          src={meta.icon}
+                          alt={meta.name}
+                          style={{
+                            width: `${FLOOR_ITEM_SIZE}px`,
+                            height: `${FLOOR_ITEM_SIZE}px`,
+                            objectFit: "contain",
+                            transform: `rotate(${placedItem?.rotation || 0}deg)`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+
+            {/* Left wall */}
             <div
               style={{
                 position: "absolute",
@@ -605,73 +634,215 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
                 height: CUBE_SIZE,
                 backgroundImage: "url(/resources/wall-right.png)",
                 backgroundSize: "cover",
-                transform: `rotateY(0deg) translateZ(-${CUBE_SIZE / 2}px)`,
+                transform: `rotateY(-90deg) translateZ(-${FLOOR_WALL_Z}px) scaleX(-1)`,
                 transformOrigin: "center center",
               }}
               aria-hidden
             >
-              {/* Wall-right: visual grid (no pointer events) + full-size drop zone — click anywhere, snap to nearest cell */}
-              {editMode && (
-                <>
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "grid",
-                      gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
-                      gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
-                      pointerEvents: "none",
-                      transform: "translateZ(1px)",
-                      border: "1px solid rgba(255,255,255,0.35)",
-                      boxSizing: "border-box",
-                    }}
-                    aria-hidden
-                  >
-                    {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          border: "1px solid rgba(255,255,255,0.4)",
-                          boxSizing: "border-box",
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Place furniture on right wall"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      pointerEvents: selectedFurnitureId ? "auto" : "none",
-                      cursor: selectedFurnitureId ? "pointer" : "default",
-                      transform: "translateZ(20px)",
-                      transformStyle: "preserve-3d",
-                    }}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!selectedFurnitureId) return;
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const u = (e.clientX - rect.left) / rect.width;
-                      const v = (e.clientY - rect.top) / rect.height;
-                      const col = Math.min(WALL_GRID_COLS - 1, Math.max(0, Math.floor(u * WALL_GRID_COLS)));
-                      const row = Math.min(WALL_GRID_ROWS - 1, Math.max(0, Math.floor(v * WALL_GRID_ROWS)));
-                      placeItem(selectedFurnitureId, { wallAnchorId: `wall-right-${row}-${col}` }, "wall");
-                    }}
-                    onKeyDown={(e) => {
-                      if (selectedFurnitureId && (e.key === "Enter" || e.key === " ")) {
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  transform: "translateZ(2px)",
+                  transformStyle: "preserve-3d",
+                  pointerEvents: editMode ? "auto" : "none",
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
+                  gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
+                }}
+                aria-hidden
+              >
+                {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+                  const row = Math.floor(i / WALL_GRID_COLS);
+                  const col = i % WALL_GRID_COLS;
+                  const wallAnchorId = `wall-left-${row}-${col}`;
+                  const placedItem = roomLayout.find(
+                    (item) => item.layer === "wall" && "wallAnchorId" in item.position && item.position.wallAnchorId === wallAnchorId
+                  );
+                  const layoutIndex = placedItem ? roomLayout.indexOf(placedItem) : null;
+                  const meta = placedItem ? getFurnitureById(placedItem.itemId) : null;
+                  const isSelected = editMode && layoutIndex !== null && selectedPlacedIndex === layoutIndex;
+                  const isHovered = dragOverCell?.wall === "left" && dragOverCell?.row === row && dragOverCell?.col === col;
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        position: "relative",
+                        border: editMode ? "1px solid rgba(255,255,255,0.4)" : "none",
+                        boxSizing: "border-box",
+                        background: isHovered ? "rgba(255,255,255,0.3)" : editMode ? "rgba(0,0,0,0.05)" : "transparent",
+                        cursor: editMode ? "pointer" : "default",
+                      }}
+                      onClick={editMode ? (e) => {
+                        e.stopPropagation();
+                        if (layoutIndex !== null) {
+                          setSelectedPlacedIndex(layoutIndex);
+                          setSelectedFurnitureId(null);
+                        } else if (selectedPlacedIndex !== null) {
+                          const item = roomLayout[selectedPlacedIndex];
+                          if (item) placeItem(item.itemId, { wallAnchorId }, "wall");
+                        } else if (selectedFurnitureId && canPlaceMore(selectedFurnitureId)) {
+                          placeItem(selectedFurnitureId, { wallAnchorId }, "wall");
+                        }
+                      } : undefined}
+                      onDragOver={editMode ? (e) => {
                         e.preventDefault();
-                        placeItem(selectedFurnitureId, { wallAnchorId: "wall-right-0-0" }, "wall");
-                      }
-                    }}
-                  />
-                </>
-              )}
+                        e.dataTransfer.dropEffect = "copy";
+                        setDragOverCell({ wall: "left", row, col });
+                      } : undefined}
+                      onDragLeave={editMode ? () => setDragOverCell(null) : undefined}
+                      onDrop={editMode ? (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const furnitureId = e.dataTransfer.getData("furnitureId");
+                        if (furnitureId && canPlaceMore(furnitureId)) {
+                          placeItem(furnitureId, { wallAnchorId }, "wall");
+                          setSelectedFurnitureId(null);
+                          setDragOverCell(null);
+                        }
+                      } : undefined}
+                    >
+                      {meta && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            outline: isSelected ? "2px solid white" : "none",
+                            outlineOffset: 2,
+                          }}
+                        >
+                          <img
+                            src={meta.icon}
+                            alt={meta.name}
+                            style={{
+                              width: `${WALL_ITEM_SIZE}px`,
+                              height: `${WALL_ITEM_SIZE}px`,
+                              objectFit: "contain",
+                              transform: `rotate(${placedItem?.rotation || 0}deg)`,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right wall */}
+            <div
+              style={{
+                position: "absolute",
+                width: CUBE_SIZE,
+                height: CUBE_SIZE,
+                backgroundImage: "url(/resources/wall-right.png)",
+                backgroundSize: "cover",
+                transform: `rotateY(0deg) translateZ(-${FLOOR_WALL_Z}px)`,
+                transformOrigin: "center center",
+              }}
+              aria-hidden
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  transform: "translateZ(2px)",
+                  transformStyle: "preserve-3d",
+                  pointerEvents: editMode ? "auto" : "none",
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
+                  gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
+                }}
+                aria-hidden
+              >
+                {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+                  const row = Math.floor(i / WALL_GRID_COLS);
+                  const col = i % WALL_GRID_COLS;
+                  const wallAnchorId = `wall-right-${row}-${col}`;
+                  const placedItem = roomLayout.find(
+                    (item) => item.layer === "wall" && "wallAnchorId" in item.position && item.position.wallAnchorId === wallAnchorId
+                  );
+                  const layoutIndex = placedItem ? roomLayout.indexOf(placedItem) : null;
+                  const meta = placedItem ? getFurnitureById(placedItem.itemId) : null;
+                  const isSelected = editMode && layoutIndex !== null && selectedPlacedIndex === layoutIndex;
+                  const isHovered = dragOverCell?.wall === "right" && dragOverCell?.row === row && dragOverCell?.col === col;
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        position: "relative",
+                        border: editMode ? "1px solid rgba(255,255,255,0.4)" : "none",
+                        boxSizing: "border-box",
+                        background: isHovered ? "rgba(255,255,255,0.3)" : editMode ? "rgba(0,0,0,0.05)" : "transparent",
+                        cursor: editMode ? "pointer" : "default",
+                      }}
+                      onClick={editMode ? (e) => {
+                        e.stopPropagation();
+                        if (layoutIndex !== null) {
+                          setSelectedPlacedIndex(layoutIndex);
+                          setSelectedFurnitureId(null);
+                        } else if (selectedPlacedIndex !== null) {
+                          const item = roomLayout[selectedPlacedIndex];
+                          if (item) placeItem(item.itemId, { wallAnchorId }, "wall");
+                        } else if (selectedFurnitureId && canPlaceMore(selectedFurnitureId)) {
+                          placeItem(selectedFurnitureId, { wallAnchorId }, "wall");
+                        }
+                      } : undefined}
+                      onDragOver={editMode ? (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "copy";
+                        setDragOverCell({ wall: "right", row, col });
+                      } : undefined}
+                      onDragLeave={editMode ? () => setDragOverCell(null) : undefined}
+                      onDrop={editMode ? (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const furnitureId = e.dataTransfer.getData("furnitureId");
+                        if (furnitureId && canPlaceMore(furnitureId)) {
+                          placeItem(furnitureId, { wallAnchorId }, "wall");
+                          setSelectedFurnitureId(null);
+                          setDragOverCell(null);
+                        }
+                      } : undefined}
+                    >
+                      {meta && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            outline: isSelected ? "2px solid white" : "none",
+                            outlineOffset: 2,
+                          }}
+                        >
+                          <img
+                            src={meta.icon}
+                            alt={meta.name}
+                            style={{
+                              width: `${WALL_ITEM_SIZE}px`,
+                              height: `${WALL_ITEM_SIZE}px`,
+                              objectFit: "contain",
+                              transform: `rotate(${placedItem?.rotation || 0}deg)`,
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>
+        
+        {/* Cat */}
         {(() => {
           const { x, y, scale } = floorToScreen(catFloor.x, catFloor.z);
           const useWalkingSprite = catSpeed >= WALK_SPEED_THRESHOLD;
@@ -686,8 +857,8 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         })()}
       </div>
 
-      {/* Footer: owned furniture to place (edit mode only) */}
-      {editMode && ownedFurniture.length > 0 && (
+      {/* Footer */}
+      {editMode && (ownedFurniture.length > 0 || selectedPlacedIndex !== null) && (
         <div
           style={{
             position: "absolute",
@@ -704,6 +875,9 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
             boxShadow: "0 -2px 8px rgba(0,0,0,0.15)",
             zIndex: 10,
           }}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseMove={(e) => e.stopPropagation()}
+          onMouseUp={(e) => e.stopPropagation()}
         >
           <span style={{ fontSize: "0.75rem", color: "rgba(255,255,255,0.9)", marginRight: "0.25rem", flexShrink: 0 }}>
             Place:
@@ -712,7 +886,23 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
             <button
               key={item.id}
               type="button"
-              onClick={() => setSelectedFurnitureId((id) => (id === item.id ? null : item.id))}
+              draggable={canPlaceMore(item.id)}
+              onDragStart={(e) => {
+                if (!canPlaceMore(item.id)) return;
+                e.dataTransfer.setData("furnitureId", item.id);
+                e.dataTransfer.effectAllowed = "copy";
+                setSelectedFurnitureId(item.id);
+                setSelectedPlacedIndex(null);
+                const dragImg = new Image();
+                dragImg.src = item.icon;
+                e.dataTransfer.setDragImage(dragImg, 12, 12);
+              }}
+              onDragEnd={() => setDragOverCell(null)}
+              onClick={() => {
+                setSelectedFurnitureId((id) => (id === item.id ? null : id));
+                setSelectedPlacedIndex(null);
+                if (selectedFurnitureId === item.id) setPreviewCursor(null);
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -720,23 +910,56 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
                 padding: "0.35rem 0.6rem",
                 borderRadius: 6,
                 border: selectedFurnitureId === item.id ? "2px solid white" : "1px solid rgba(255,255,255,0.4)",
-                background: selectedFurnitureId === item.id ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)",
-                color: "white",
+                background: selectedFurnitureId === item.id ? "rgba(255,255,255,0.2)" : !canPlaceMore(item.id) ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.08)",
+                color: !canPlaceMore(item.id) ? "rgba(255,255,255,0.5)" : "white",
                 fontSize: "0.8125rem",
-                cursor: "pointer",
+                cursor: canPlaceMore(item.id) ? "grab" : "not-allowed",
               }}
+              disabled={!canPlaceMore(item.id)}
             >
               <img
                 src={item.icon}
                 alt=""
-                style={{ width: 24, height: 24, objectFit: "cover", borderRadius: 4 }}
+                style={{ 
+                  width: 24, 
+                  height: 24, 
+                  objectFit: "cover", 
+                  borderRadius: 4, 
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  WebkitUserDrag: "none",
+                }}
               />
-              <span>{item.name}</span>
+              <span style={{ userSelect: "none" }}>{item.name}</span>
+              <span style={{ fontSize: "0.7rem", opacity: 0.9, userSelect: "none" }}>({getPlacedCount(item.id)}/{getOwnedCount(item.id)})</span>
             </button>
           ))}
-          {selectedFurnitureId && (
+          {selectedPlacedIndex !== null && (
+            <>
+              <button
+                type="button"
+                onClick={() => removePlacedItem(selectedPlacedIndex)}
+                style={{
+                  marginLeft: "0.5rem",
+                  padding: "0.35rem 0.6rem",
+                  borderRadius: 6,
+                  border: "1px solid rgba(255,100,100,0.6)",
+                  background: "rgba(255,80,80,0.25)",
+                  color: "white",
+                  fontSize: "0.8125rem",
+                  cursor: "pointer",
+                }}
+              >
+                Remove
+              </button>
+              <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.75)" }}>
+                Click empty spot to move
+              </span>
+            </>
+          )}
+          {selectedFurnitureId && selectedPlacedIndex === null && (
             <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.75)", marginLeft: "auto" }}>
-              Click floor or wall to place
+              Click or drag to place
             </span>
           )}
         </div>
