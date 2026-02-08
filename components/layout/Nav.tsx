@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -19,13 +18,8 @@ export function Nav({ onNavigate, onEditCatSpace }: NavProps) {
     router.refresh();
   }
 
-  const linkStyle = { fontSize: "0.875rem", color: "var(--text-primary)", textDecoration: "none" };
-
   return (
     <nav style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <Link href="/" style={linkStyle} onClick={onNavigate}>
-        Shop
-      </Link>
       <button
         type="button"
         className="btn"

@@ -56,12 +56,29 @@ export async function PATCH(request: Request) {
   if (typeof body.hasCompletedOnboarding === "boolean")
     updates.has_completed_onboarding = body.hasCompletedOnboarding;
 
-  const { error } = await supabase
+  const { data: updated, error: updateError } = await supabase
     .from("user_state")
     .update(updates)
-    .eq("user_id", user.id);
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    .eq("user_id", user.id)
+    .select("user_id");
+  if (updateError) {
+    return NextResponse.json({ error: updateError.message }, { status: 500 });
+  }
+  // If no row existed, create one so points deduction persists (e.g. first purchase)
+  if (Array.isArray(updated) && updated.length === 0 && (updates.points !== undefined || Object.keys(updates).length > 1)) {
+    const { error: insertError } = await supabase.from("user_state").upsert(
+      {
+        user_id: user.id,
+        points: typeof updates.points === "number" ? updates.points : 0,
+        streak_count: updates.streak_count ?? 0,
+        has_completed_onboarding: updates.has_completed_onboarding ?? false,
+        updated_at: updates.updated_at ?? new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
+    }
   }
   return NextResponse.json({ ok: true });
 }
