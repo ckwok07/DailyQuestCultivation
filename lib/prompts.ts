@@ -6,7 +6,15 @@ export const DAILY_PROMPT_TASK_ID = "daily_prompt";
 export const DAILY_PROMPT_POINTS = 10;
 
 const PROMPTS: string[] = [
-  "MEOW",
+  "Go on a 15 minute walk, find 3 purple things on your walk",
+  "Compliment someone's outfit",
+  "Talk to Maddie",
+  "Say yes to plans that you wouldn't usually say yes to",
+  "Try a new restaurant or food",
+  "Pet to a stranger's dog/cat",
+  "Smile at a baby",
+  ""
+
   
 ];
 
