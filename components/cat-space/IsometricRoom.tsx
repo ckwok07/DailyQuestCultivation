@@ -170,7 +170,7 @@ type IsometricRoomProps = {
 };
 
 export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps) {
-  const { ownedItems, setRoomLayout } = usePlayer();
+  const { ownedItems, setRoomLayout, equippedCosmeticIds } = usePlayer();
   const [selectedFurnitureId, setSelectedFurnitureId] = useState<string | null>(null);
   /** Index into roomLayout of the placed item selected for move/remove (edit mode) */
   const [selectedPlacedIndex, setSelectedPlacedIndex] = useState<number | null>(null);
@@ -825,6 +825,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               scale={scale}
               isWalking={useWalkingSprite}
               faceRight={faceRight}
+              equippedCosmeticIds={equippedCosmeticIds}
             />
           );
         })()}

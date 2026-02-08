@@ -11,7 +11,7 @@ export async function GET() {
   }
   const { data, error } = await supabase
     .from("user_state")
-    .select("points, streak_count, has_completed_onboarding")
+    .select("points, streak_count, has_completed_onboarding, equipped_cosmetics")
     .eq("user_id", user.id)
     .single();
   if (error) {
@@ -20,10 +20,12 @@ export async function GET() {
         points: 0,
         streakCount: 0,
         hasCompletedOnboarding: false,
+        equippedCosmeticIds: [],
       });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  const equippedCosmeticIds = Array.isArray(data.equipped_cosmetics) ? data.equipped_cosmetics : [];
 
   // Keep today's snapshot up to date when user loads app
   const today = new Date().toISOString().slice(0, 10);
@@ -41,6 +43,7 @@ export async function GET() {
     points: data.points ?? 0,
     streakCount: data.streak_count ?? 0,
     hasCompletedOnboarding: data.has_completed_onboarding ?? false,
+    equippedCosmeticIds,
   });
 }
 
@@ -52,7 +55,7 @@ export async function PATCH(request: Request) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  let body: { points?: number; streakCount?: number; hasCompletedOnboarding?: boolean };
+  let body: { points?: number; streakCount?: number; hasCompletedOnboarding?: boolean; equippedCosmeticIds?: string[] };
   try {
     body = await request.json();
   } catch {
@@ -62,12 +65,15 @@ export async function PATCH(request: Request) {
     points?: number;
     streak_count?: number;
     has_completed_onboarding?: boolean;
+    equipped_cosmetics?: string[];
     updated_at?: string;
   } = { updated_at: new Date().toISOString() };
   if (typeof body.points === "number") updates.points = body.points;
   if (typeof body.streakCount === "number") updates.streak_count = body.streakCount;
   if (typeof body.hasCompletedOnboarding === "boolean")
     updates.has_completed_onboarding = body.hasCompletedOnboarding;
+  if (Array.isArray(body.equippedCosmeticIds))
+    updates.equipped_cosmetics = body.equippedCosmeticIds.filter((id) => typeof id === "string");
 
   const { data: updated, error: updateError } = await supabase
     .from("user_state")
@@ -85,6 +91,7 @@ export async function PATCH(request: Request) {
         points: typeof updates.points === "number" ? updates.points : 0,
         streak_count: updates.streak_count ?? 0,
         has_completed_onboarding: updates.has_completed_onboarding ?? false,
+        equipped_cosmetics: updates.equipped_cosmetics ?? [],
         updated_at: updates.updated_at ?? new Date().toISOString(),
       },
       { onConflict: "user_id" }

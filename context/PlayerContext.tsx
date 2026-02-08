@@ -16,6 +16,7 @@ type PlayerState = {
   hasCompletedOnboarding: boolean;
   ownedItems: string[];
   roomLayout: RoomLayoutItem[];
+  equippedCosmeticIds: string[];
 };
 
 const defaultState: PlayerState = {
@@ -24,6 +25,7 @@ const defaultState: PlayerState = {
   hasCompletedOnboarding: false,
   ownedItems: [],
   roomLayout: [],
+  equippedCosmeticIds: [],
 };
 
 type PlayerContextValue = PlayerState & {
@@ -31,6 +33,7 @@ type PlayerContextValue = PlayerState & {
   setHasCompletedOnboarding: (value: boolean) => void;
   setOwnedItems: (items: string[]) => void;
   setRoomLayout: (layout: RoomLayoutItem[]) => void;
+  setEquippedCosmeticIds: (ids: string[]) => void;
   loadUserData: () => Promise<void>;
   isLoading: boolean;
 };
@@ -74,6 +77,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         hasCompletedOnboarding: stateData?.hasCompletedOnboarding ?? prev.hasCompletedOnboarding,
         roomLayout: Array.isArray(roomData) ? roomData : prev.roomLayout,
         ownedItems: Array.isArray(itemsData) ? itemsData : prev.ownedItems,
+        equippedCosmeticIds: Array.isArray(stateData?.equippedCosmeticIds) ? stateData.equippedCosmeticIds : prev.equippedCosmeticIds,
       }));
     } finally {
       setIsLoading(false);
@@ -96,6 +100,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const setRoomLayout = useCallback((layout: RoomLayoutItem[]) => {
     setState((prev) => ({ ...prev, roomLayout: layout }));
   }, []);
+  const setEquippedCosmeticIds = useCallback((equippedCosmeticIds: string[]) => {
+    setState((prev) => ({ ...prev, equippedCosmeticIds }));
+  }, []);
 
   const value: PlayerContextValue = {
     ...state,
@@ -103,6 +110,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setHasCompletedOnboarding,
     setOwnedItems,
     setRoomLayout,
+    setEquippedCosmeticIds,
     loadUserData,
     isLoading,
   };

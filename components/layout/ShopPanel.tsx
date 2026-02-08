@@ -23,6 +23,8 @@ const FURNITURE_ITEMS: ShopItemDef[] = [
 ];
 const COSMETIC_ITEMS: ShopItemDef[] = [
   { id: "angel-wings", name: "Angel wings", price: 75, category: "cosmetics" },
+  { id: "wizard_hat", name: "Wizard hat", price: 60, category: "cosmetics" },
+  { id: "red_bow", name: "Red bow", price: 45, category: "cosmetics" },
 ];
 
 /** Furniture icon: framed cat portrait */
@@ -107,7 +109,6 @@ function CouchIcon() {
 function AngelWingIcon() {
   return (
     <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden style={{ flexShrink: 0 }}>
-      {/* Left wing: one shape sweeping up and out */}
       <path
         d="M28 40 L12 22 Q6 28 12 36 L24 40 Q16 36 28 30 L28 40 Z"
         fill="#f0ece4"
@@ -117,7 +118,6 @@ function AngelWingIcon() {
       />
       <path d="M20 32 Q12 28 12 24" stroke="#2d2d2d" strokeWidth="1.5" fill="none" strokeLinecap="round" />
       <path d="M18 36 Q10 32 12 30" stroke="#2d2d2d" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      {/* Right wing */}
       <path
         d="M28 40 L44 22 Q50 28 44 36 L32 40 Q40 36 28 30 L28 40 Z"
         fill="#f0ece4"
@@ -127,6 +127,35 @@ function AngelWingIcon() {
       />
       <path d="M36 32 Q44 28 44 24" stroke="#2d2d2d" strokeWidth="1.5" fill="none" strokeLinecap="round" />
       <path d="M38 36 Q46 32 44 30" stroke="#2d2d2d" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Cosmetics icon: wizard hat */
+function WizardHatIcon() {
+  return (
+    <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+      <path
+        d="M28 14 L8 38 L48 38 Z"
+        fill="#3d2c5c"
+        stroke="#2d1f45"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <ellipse cx="28" cy="36" rx="20" ry="4" fill="#4a3568" stroke="#2d1f45" strokeWidth="1" />
+      <path d="M28 14 L28 10" stroke="#c9a227" strokeWidth="2" strokeLinecap="round" />
+      <circle cx="28" cy="10" r="3" fill="#c9a227" stroke="#9a7b1a" strokeWidth="1" />
+    </svg>
+  );
+}
+
+/** Cosmetics icon: red bow */
+function RedBowIcon() {
+  return (
+    <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden style={{ flexShrink: 0 }}>
+      <ellipse cx="22" cy="28" rx="10" ry="6" fill="#c41e3a" stroke="#8b0000" strokeWidth="1.5" />
+      <ellipse cx="34" cy="28" rx="10" ry="6" fill="#c41e3a" stroke="#8b0000" strokeWidth="1.5" />
+      <circle cx="28" cy="28" r="4" fill="#8b0000" />
     </svg>
   );
 }
@@ -141,6 +170,10 @@ function renderItemIcon(itemId: string) {
       return <PosterIcon />;
     case "angel-wings":
       return <AngelWingIcon />;
+    case "wizard_hat":
+      return <WizardHatIcon />;
+    case "red_bow":
+      return <RedBowIcon />;
     default:
       return null;
   }
@@ -148,9 +181,10 @@ function renderItemIcon(itemId: string) {
 
 export function ShopPanel({ onClose }: ShopPanelProps) {
   const [activeTab, setActiveTab] = useState<ShopTab>("furniture");
-  const { points, ownedItems, setPoints, setOwnedItems } = usePlayer();
+  const { points, ownedItems, setPoints, setOwnedItems, equippedCosmeticIds, setEquippedCosmeticIds } = usePlayer();
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
+  const [equippingId, setEquippingId] = useState<string | null>(null);
 
   async function handleBuy(item: ShopItemDef) {
     if (ownedItems.includes(item.id) || points < item.price) return;
@@ -183,6 +217,27 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
   }
 
   const items = activeTab === "furniture" ? FURNITURE_ITEMS : COSMETIC_ITEMS;
+
+  async function handleEquipToggle(itemId: string) {
+    if (activeTab !== "cosmetics" || !ownedItems.includes(itemId)) return;
+    setEquippingId(itemId);
+    const next = equippedCosmeticIds.includes(itemId)
+      ? equippedCosmeticIds.filter((id) => id !== itemId)
+      : [...equippedCosmeticIds, itemId];
+    setEquippedCosmeticIds(next);
+    try {
+      const res = await fetch("/api/user/state", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ equippedCosmeticIds: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+    } catch {
+      setEquippedCosmeticIds(equippedCosmeticIds);
+    } finally {
+      setEquippingId(null);
+    }
+  }
 
   return (
     <div
@@ -333,16 +388,33 @@ export function ShopPanel({ onClose }: ShopPanelProps) {
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.5rem" }}>
                       {owned ? (
-                        <span
-                          style={{
-                            fontSize: "0.8125rem",
-                            fontWeight: 600,
-                            color: "var(--text-secondary)",
-                            padding: "0.35rem 0.75rem",
-                          }}
-                        >
-                          Owned
-                        </span>
+                        activeTab === "cosmetics" ? (
+                          <button
+                            type="button"
+                            className="btn"
+                            disabled={equippingId !== null}
+                            style={{
+                              fontSize: "0.8125rem",
+                              padding: "0.35rem 0.75rem",
+                              background: equippedCosmeticIds.includes(item.id) ? "var(--text-primary)" : undefined,
+                              color: equippedCosmeticIds.includes(item.id) ? "white" : undefined,
+                            }}
+                            onClick={() => handleEquipToggle(item.id)}
+                          >
+                            {equippingId === item.id ? "..." : equippedCosmeticIds.includes(item.id) ? "Equipped" : "Equip"}
+                          </button>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: "0.8125rem",
+                              fontWeight: 600,
+                              color: "var(--text-secondary)",
+                              padding: "0.35rem 0.75rem",
+                            }}
+                          >
+                            Owned
+                          </span>
+                        )
                       ) : (
                         <>
                           {!canAfford && (
