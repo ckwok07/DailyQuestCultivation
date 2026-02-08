@@ -6,9 +6,21 @@ import { MainContent } from "@/components/MainContent";
 import { IsometricRoom } from "@/components/cat-space";
 import { usePlayer } from "@/context/PlayerContext";
 
+function addDays(d: Date, days: number): Date {
+  const out = new Date(d);
+  out.setDate(out.getDate() + days);
+  return out;
+}
+
 export default function Home() {
   const [catSpaceEditMode, setCatSpaceEditMode] = useState(false);
+  const [testDate, setTestDate] = useState<Date | null>(null);
   const { roomLayout } = usePlayer();
+
+  const handleNewDayTest = () => {
+    const base = testDate ?? new Date();
+    setTestDate(addDays(base, 1));
+  };
 
   return (
     <main style={{ display: "flex", minHeight: "100vh" }}>
@@ -22,7 +34,17 @@ export default function Home() {
           gap: "1rem",
         }}
       >
-        <MainContent />
+        <MainContent testDate={testDate} />
+        <div style={{ marginTop: "auto", paddingTop: "1rem" }}>
+          <button
+            type="button"
+            onClick={handleNewDayTest}
+            className="btn"
+            style={{ fontSize: "0.85rem", opacity: 0.9 }}
+          >
+            New day (test)
+          </button>
+        </div>
       </section>
       <section
         style={{

@@ -26,9 +26,14 @@ type CompletionEntry = {
   metadata?: Record<string, unknown>;
 };
 
-export function MainContent() {
+type MainContentProps = {
+  /** When set, use this date instead of real today (for "new day" test). */
+  testDate?: Date | null;
+};
+
+export function MainContent({ testDate }: MainContentProps) {
   const { isLoading, loadUserData, points, setPoints } = usePlayer();
-  const today = new Date();
+  const today = testDate ?? new Date();
   const dateKey = toDateKey(today);
   const dailyPromptText = getPromptForDate(today);
 

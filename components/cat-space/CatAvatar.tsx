@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 type CatAvatarProps = {
   /** Screen offset from center (px) — floor position projected to 2D */
   screenX?: number;
@@ -17,11 +19,23 @@ export function CatAvatar({
   scale = 1,
   isWalking = true,
 }: CatAvatarProps) {
-  // Choose sprite based on walking state
-  const spriteUrl = isWalking 
-    ? "/resources/cat-static.png"  // walking sprite
-    : "/resources/idle.png";        // idle animation (can be .png, .gif, or .apng)
-  
+  // Walking: walking.gif; idle: idle.gif (fallback to cat-static.png if missing)
+  const [idleFailed, setIdleFailed] = useState(false);
+
+  useEffect(() => {
+    if (isWalking) setIdleFailed(false);
+  }, [isWalking]);
+
+  const displayUrl = isWalking
+    ? "/resources/walking.gif"
+    : idleFailed
+      ? "/resources/cat-static.png"
+      : "/resources/idle.gif";
+
+  const handleError = () => {
+    if (!isWalking) setIdleFailed(true);
+  };
+
   return (
     <div
       style={{
@@ -38,8 +52,10 @@ export function CatAvatar({
       }}
     >
       <img
-        src={spriteUrl}
+        key={displayUrl}
+        src={displayUrl}
         alt="Cat"
+        onError={handleError}
         style={{ 
           width: "100%", 
           height: "100%", 

@@ -116,8 +116,8 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
   
   const targetRef = useRef({ x: 0, z: 0 });
   const hasTargetRef = useRef(false);
-  const animationFrameRef = useRef<number>();
-  const behaviorTimeoutRef = useRef<NodeJS.Timeout>();
+  const animationFrameRef = useRef<number | undefined>(undefined);
+  const behaviorTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const behaviorModeRef = useRef<'always-walk' | 'walk-stop'>('always-walk');
 
   // Pick a new target that's different from current position
@@ -154,9 +154,9 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       clearTimeout(behaviorTimeoutRef.current);
     }
 
-    // Randomly decide behavior mode at the start
+    // Randomly decide behavior mode at the start (bias toward walking so walking.gif shows)
     if (!behaviorModeRef.current || Math.random() < 0.3) {
-      behaviorModeRef.current = Math.random() < 0.5 ? 'always-walk' : 'walk-stop';
+      behaviorModeRef.current = Math.random() < 0.7 ? 'always-walk' : 'walk-stop';
     }
     
     if (behaviorModeRef.current === 'always-walk') {
@@ -383,7 +383,14 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         </div>
         {(() => {
           const { x, y, scale } = floorToScreen(catFloorX, catFloorZ);
-          return <CatAvatar screenX={x} screenY={y} scale={scale} />;
+          return (
+            <CatAvatar
+              screenX={x}
+              screenY={y}
+              scale={scale}
+              isWalking={isWalking}
+            />
+          );
         })()}
       </div>
     </div>
