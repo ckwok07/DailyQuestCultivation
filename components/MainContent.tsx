@@ -27,15 +27,18 @@ type CompletionEntry = {
 };
 
 type MainContentProps = {
-  /** When set, use this date instead of real today (for "new day" test). */
-  testDate?: Date | null;
+  /** When this changes, reset prompt/song/document UI for "new day" test (same date, no API change). */
+  resetTasksKey?: number;
+  /** When set, use this date for the daily prompt text only (cycles on "new day" test). */
+  promptDateOverride?: Date | null;
 };
 
-export function MainContent({ testDate }: MainContentProps) {
+export function MainContent({ resetTasksKey = 0, promptDateOverride = null }: MainContentProps) {
   const { isLoading, loadUserData, points, setPoints } = usePlayer();
-  const today = testDate ?? new Date();
+  const today = new Date();
   const dateKey = toDateKey(today);
-  const dailyPromptText = getPromptForDate(today);
+  const promptDate = promptDateOverride ?? today;
+  const dailyPromptText = getPromptForDate(promptDate);
 
   const [completions, setCompletions] = useState<CompletionEntry[]>([]);
   const [completing, setCompleting] = useState<string | null>(null);
@@ -48,6 +51,7 @@ export function MainContent({ testDate }: MainContentProps) {
 
   const [dailyLogOpen, setDailyLogOpen] = useState(false);
   const [dailyLogText, setDailyLogText] = useState("");
+  const [dailyLogError, setDailyLogError] = useState<string | null>(null);
   const documentInputRef = useRef<HTMLInputElement>(null);
 
   const fetchCompletions = useCallback(async () => {
@@ -61,6 +65,19 @@ export function MainContent({ testDate }: MainContentProps) {
     if (!isLoading) fetchCompletions();
   }, [isLoading, fetchCompletions]);
 
+  // New day (test): reset UI after DB was cleared for this date
+  useEffect(() => {
+    if (resetTasksKey <= 0) return;
+    setCompletions([]);
+    setDailyLogOpen(false);
+    setDailyLogText("");
+    setDailyLogError(null);
+    setEditingSong(false);
+    setEditingDoc(false);
+    setCompleting(null);
+    fetchCompletions();
+  }, [resetTasksKey, fetchCompletions]);
+
   const completionByTaskId = (taskId: string) =>
     completions.find((c) => c.taskId === taskId);
 
@@ -72,9 +89,11 @@ export function MainContent({ testDate }: MainContentProps) {
     if (dailyCompleted || completing) return;
     if (!dailyLogOpen) {
       setDailyLogOpen(true);
+      setDailyLogError(null);
       return;
     }
     setCompleting(DAILY_PROMPT_TASK_ID);
+    setDailyLogError(null);
     try {
       const res = await fetch("/api/user/completions", {
         method: "POST",
@@ -95,7 +114,13 @@ export function MainContent({ testDate }: MainContentProps) {
         else setPoints(points + DAILY_PROMPT_POINTS);
         await fetchCompletions();
         await loadUserData();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setDailyLogError((data.error as string) || `Request failed (${res.status})`);
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Network error";
+      setDailyLogError(message === "Failed to fetch" ? "Network error. Check your connection and try again." : message);
     } finally {
       setCompleting(null);
     }
@@ -217,6 +242,11 @@ export function MainContent({ testDate }: MainContentProps) {
         {dailyCompleted && (
           <p style={{ margin: 0, fontSize: "0.9rem", color: "var(--text-secondary)" }}>
             {dailyCompleted.notes ? `“${dailyCompleted.notes}”` : "Complete"}
+          </p>
+        )}
+        {dailyLogError && (
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--color-error, #c00)" }}>
+            {dailyLogError}
           </p>
         )}
       </div>

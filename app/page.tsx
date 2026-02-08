@@ -6,6 +6,13 @@ import { MainContent } from "@/components/MainContent";
 import { IsometricRoom } from "@/components/cat-space";
 import { usePlayer } from "@/context/PlayerContext";
 
+function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function addDays(d: Date, days: number): Date {
   const out = new Date(d);
   out.setDate(out.getDate() + days);
@@ -14,12 +21,22 @@ function addDays(d: Date, days: number): Date {
 
 export default function Home() {
   const [catSpaceEditMode, setCatSpaceEditMode] = useState(false);
-  const [testDate, setTestDate] = useState<Date | null>(null);
+  const [resetTasksKey, setResetTasksKey] = useState(0);
+  const [promptDateOverride, setPromptDateOverride] = useState<Date | null>(null);
   const { roomLayout } = usePlayer();
 
-  const handleNewDayTest = () => {
-    const base = testDate ?? new Date();
-    setTestDate(addDays(base, 1));
+  const handleNewDayTest = async () => {
+    const dateKey = toDateKey(new Date());
+    try {
+      const res = await fetch(`/api/user/completions?date=${dateKey}`, { method: "DELETE" });
+      if (res.ok) {
+        setResetTasksKey((k) => k + 1);
+        setPromptDateOverride((prev) => addDays(prev ?? new Date(), 1));
+      }
+    } catch {
+      setResetTasksKey((k) => k + 1);
+      setPromptDateOverride((prev) => addDays(prev ?? new Date(), 1));
+    }
   };
 
   return (
@@ -34,7 +51,7 @@ export default function Home() {
           gap: "1rem",
         }}
       >
-        <MainContent testDate={testDate} />
+        <MainContent resetTasksKey={resetTasksKey} promptDateOverride={promptDateOverride} />
         <div style={{ marginTop: "auto", paddingTop: "1rem" }}>
           <button
             type="button"

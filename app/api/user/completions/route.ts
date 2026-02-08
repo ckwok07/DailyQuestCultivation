@@ -115,3 +115,33 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true, points: newPoints });
 }
+
+/** DELETE: clear all task completions for the given date (for "new day" test). */
+export async function DELETE(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(request.url);
+  const date = searchParams.get("date"); // YYYY-MM-DD
+
+  if (!date) {
+    return NextResponse.json({ error: "Missing date query" }, { status: 400 });
+  }
+
+  const { error } = await supabase
+    .from("task_completions")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("date", date);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
