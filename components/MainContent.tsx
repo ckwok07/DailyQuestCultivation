@@ -65,7 +65,7 @@ export function MainContent({ resetTasksKey = 0, promptDateOverride = null }: Ma
     if (!isLoading) fetchCompletions();
   }, [isLoading, fetchCompletions]);
 
-  // New day (test): reset UI after DB was cleared for this date
+  // New day (test): DB already cleared for this date; reset all prompts/answers and refetch
   useEffect(() => {
     if (resetTasksKey <= 0) return;
     setCompletions([]);
@@ -75,6 +75,9 @@ export function MainContent({ resetTasksKey = 0, promptDateOverride = null }: Ma
     setEditingSong(false);
     setEditingDoc(false);
     setCompleting(null);
+    setSongTitle("When I'm Small");
+    setSongArtist("Phantogram");
+    setDocumentTitle("You and a friend");
     fetchCompletions();
   }, [resetTasksKey, fetchCompletions]);
 

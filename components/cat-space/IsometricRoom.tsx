@@ -9,8 +9,8 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 2;
 const PAN_LIMIT = 120;
 
-/** Floor texture is a diamond. Use 0.95 to get very close to edges */
-const FLOOR_DIAMOND_R = CUBE_SIZE / 2 * 0.95; // Increased from 0.9
+/** Cat walkable area = red overlay = full floor face. Same bounds everywhere. */
+const FLOOR_HALF = CUBE_SIZE / 2; // ±this in floor x,z = red overlay extent
 
 /** Depth for perspective */
 const DEPTH_MIN = -CUBE_SIZE;
@@ -24,8 +24,8 @@ const WALK_DURATION_MAX = 5000;
 const STOP_DURATION_MIN = 500;
 const STOP_DURATION_MAX = 2000;
 const MOVEMENT_SPEED = 0.5;
-const TARGET_REACHED_THRESHOLD = 3;
-const MIN_TARGET_DISTANCE = 60;
+const TARGET_REACHED_THRESHOLD = 0.8; // stop when almost at target so cat reaches border
+const MIN_TARGET_DISTANCE = 40;
 /** Speed below this → show static cat; at or above → walking.gif */
 const WALK_SPEED_THRESHOLD = 0.2;
 
@@ -44,55 +44,51 @@ function floorToScreen(
   return { x, y, scale };
 }
 
-/** Pick random point inside diamond boundary: |x| + |z| ≤ R */
-function randomPointInDiamond(R: number): { x: number; z: number } {
-  let x: number, z: number;
-  do {
-    x = (Math.random() - 0.5) * 2 * R;
-    z = (Math.random() - 0.5) * 2 * R;
-  } while (Math.abs(x) + Math.abs(z) > R);
-  
-  return { x, z };
-}
-
-/** Pick a point that's biased toward edges for better coverage */
-function randomPointBiasedToEdges(R: number): { x: number; z: number } {
-  // 60% chance to pick a point near/on the edge (increased from 40%)
-  if (Math.random() < 0.6) {
-    // Pick a random angle
-    const angle = Math.random() * Math.PI * 2;
-    // Pick a distance that's 75-100% of max radius (increased from 60-100%)
-    const distance = R * (0.75 + Math.random() * 0.25);
-    
-    // Convert polar to cartesian for diamond shape
-    const absX = Math.abs(Math.cos(angle));
-    const absZ = Math.abs(Math.sin(angle));
-    const scale = distance / (absX + absZ);
-    
-    return {
-      x: Math.cos(angle) * scale,
-      z: Math.sin(angle) * scale
-    };
-  } else {
-    // Regular random point
-    return randomPointInDiamond(R);
-  }
-}
-
-/** Pick a point directly ON the border to encourage border walking */
-function randomPointOnBorder(R: number): { x: number; z: number } {
-  const angle = Math.random() * Math.PI * 2;
-  // Use full radius to be exactly on the border
-  const distance = R;
-  
-  const absX = Math.abs(Math.cos(angle));
-  const absZ = Math.abs(Math.sin(angle));
-  const scale = distance / (absX + absZ);
-  
+/** Clamp (x, z) to the red walkable overlay: |x| ≤ H, |z| ≤ H */
+function clampToFloorSquare(
+  x: number,
+  z: number,
+  H: number
+): { x: number; z: number } {
   return {
-    x: Math.cos(angle) * scale,
-    z: Math.sin(angle) * scale
+    x: Math.max(-H, Math.min(H, x)),
+    z: Math.max(-H, Math.min(H, z)),
   };
+}
+
+/** Pick random point inside floor square */
+function randomPointInSquare(H: number): { x: number; z: number } {
+  return {
+    x: (Math.random() * 2 - 1) * H,
+    z: (Math.random() * 2 - 1) * H,
+  };
+}
+
+/** Pick a point biased toward edges of the square for better coverage */
+function randomPointBiasedToEdges(H: number): { x: number; z: number } {
+  if (Math.random() < 0.6) {
+    const edge = Math.floor(Math.random() * 4);
+    const t = Math.random();
+    switch (edge) {
+      case 0: return { x: H * (2 * t - 1), z: H };
+      case 1: return { x: H, z: H * (2 * t - 1) };
+      case 2: return { x: H * (2 * t - 1), z: -H };
+      default: return { x: -H, z: H * (2 * t - 1) };
+    }
+  }
+  return randomPointInSquare(H);
+}
+
+/** Pick a point on the border of the square */
+function randomPointOnBorder(H: number): { x: number; z: number } {
+  const edge = Math.floor(Math.random() * 4);
+  const t = Math.random();
+  switch (edge) {
+    case 0: return { x: H * (2 * t - 1), z: H };
+    case 1: return { x: H, z: H * (2 * t - 1) };
+    case 2: return { x: H * (2 * t - 1), z: -H };
+    default: return { x: -H, z: H * (2 * t - 1) };
+  }
 }
 
 /** Random number between min and max */
@@ -112,8 +108,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
   const [isDragging, setIsDragging] = useState(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
   
-  const [catFloorX, setCatFloorX] = useState<number>(0);
-  const [catFloorZ, setCatFloorZ] = useState<number>(0);
+  const [catFloor, setCatFloor] = useState<{ x: number; z: number }>({ x: 0, z: 0 });
   const [isWalking, setIsWalking] = useState(true);
   const [catSpeed, setCatSpeed] = useState(0);
   
@@ -128,14 +123,14 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     let attempts = 0;
     let target;
     
-    // 30% chance to pick a point exactly on the border
-    const pickBorderPoint = Math.random() < 0.3;
+    // Often pick a point on the border so the cat walks all the way to the edge
+    const pickBorderPoint = Math.random() < 0.6;
     
     // Keep trying until we get a target that's reasonably far from current position
     do {
       target = pickBorderPoint 
-        ? randomPointOnBorder(FLOOR_DIAMOND_R)
-        : randomPointBiasedToEdges(FLOOR_DIAMOND_R);
+        ? randomPointOnBorder(FLOOR_HALF)
+        : randomPointBiasedToEdges(FLOOR_HALF);
         
       const dx = target.x - currentX;
       const dz = target.z - currentZ;
@@ -148,7 +143,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       attempts++;
     } while (attempts < 20);
     
-    return target || randomPointBiasedToEdges(FLOOR_DIAMOND_R);
+    return target || randomPointBiasedToEdges(FLOOR_HALF);
   }, []);
 
   // Schedule next behavior change (walk or stop)
@@ -185,58 +180,46 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
     }
   }, []);
 
-  // Animation loop - smooth movement
+  // Animation loop - smooth movement (position clamped to diamond so cat stays on visible floor)
   useEffect(() => {
     const animate = () => {
       if (isWalking) {
-        setCatFloorX((currentX = 0) => {
-          setCatFloorZ((currentZ = 0) => {
-            // Pick new target if we don't have one or reached current target
-            if (!hasTargetRef.current) {
-              const newTarget = pickNewTarget(currentX, currentZ);
-              targetRef.current = newTarget;
-              hasTargetRef.current = true;
-            }
+        setCatFloor((prev) => {
+          const currentX = prev.x;
+          const currentZ = prev.z;
 
-            const dx = targetRef.current.x - currentX;
-            const dz = targetRef.current.z - currentZ;
-            const distance = Math.sqrt(dx * dx + dz * dz);
-
-            // If reached target, mark as no target
-            if (distance < TARGET_REACHED_THRESHOLD) {
-              hasTargetRef.current = false;
-              setCatSpeed(0);
-              return currentZ;
-            }
-
-            // Move towards target
-            const moveZ = (dz / distance) * MOVEMENT_SPEED;
-
-            // Ensure we don't overshoot
-            if (distance < MOVEMENT_SPEED) {
-              setCatSpeed(0);
-              return targetRef.current.z;
-            }
-
-            setCatSpeed(MOVEMENT_SPEED);
-            return currentZ + moveZ;
-          });
+          if (!hasTargetRef.current) {
+            const newTarget = pickNewTarget(currentX, currentZ);
+            targetRef.current = newTarget;
+            hasTargetRef.current = true;
+          }
 
           const dx = targetRef.current.x - currentX;
-          const dz = targetRef.current.z - catFloorZ;
+          const dz = targetRef.current.z - currentZ;
           const distance = Math.sqrt(dx * dx + dz * dz);
 
           if (distance < TARGET_REACHED_THRESHOLD) {
-            return currentX;
+            hasTargetRef.current = false;
+            setCatSpeed(0);
+            return prev;
           }
 
           const moveX = (dx / distance) * MOVEMENT_SPEED;
+          const moveZ = (dz / distance) * MOVEMENT_SPEED;
 
+          let nextX: number;
+          let nextZ: number;
           if (distance < MOVEMENT_SPEED) {
-            return targetRef.current.x;
+            setCatSpeed(0);
+            nextX = targetRef.current.x;
+            nextZ = targetRef.current.z;
+          } else {
+            setCatSpeed(MOVEMENT_SPEED);
+            nextX = currentX + moveX;
+            nextZ = currentZ + moveZ;
           }
 
-          return currentX + moveX;
+          return clampToFloorSquare(nextX, nextZ, FLOOR_HALF); // same as red overlay
         });
       } else {
         setCatSpeed(0);
@@ -256,9 +239,8 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
 
   // Initialize position and behavior
   useEffect(() => {
-    const initial = randomPointBiasedToEdges(FLOOR_DIAMOND_R);
-    setCatFloorX(initial.x);
-    setCatFloorZ(initial.z);
+    const initial = randomPointBiasedToEdges(FLOOR_HALF);
+    setCatFloor(initial);
     hasTargetRef.current = false;
     
     scheduleNextBehavior();
@@ -391,7 +373,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
           </div>
         </div>
         {(() => {
-          const { x, y, scale } = floorToScreen(catFloorX, catFloorZ);
+          const { x, y, scale } = floorToScreen(catFloor.x, catFloor.z);
           const useWalkingSprite = catSpeed >= WALK_SPEED_THRESHOLD;
           return (
             <CatAvatar

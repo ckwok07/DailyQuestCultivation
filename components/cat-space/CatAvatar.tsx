@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 const WALKING_URL = "/resources/walking.gif";
 const STATIC_URL = "/resources/cat-static.png";
 
@@ -15,25 +13,14 @@ type CatAvatarProps = {
   isWalking?: boolean;
 };
 
-/** Cat rendered as flat 2D overlay (no skew) — positioned over floor. */
+/** Cat rendered as flat 2D overlay — walking.gif when moving, cat-static.png when idle. */
 export function CatAvatar({
   screenX = 0,
   screenY = 0,
   scale = 1,
   isWalking = true,
 }: CatAvatarProps) {
-  const intendedSrc = isWalking ? WALKING_URL : STATIC_URL;
-  const [fallbackUsed, setFallbackUsed] = useState(false);
-
-  useEffect(() => {
-    if (isWalking) setFallbackUsed(false);
-  }, [isWalking]);
-
-  const handleError = () => {
-    setFallbackUsed(true);
-  };
-
-  const src = fallbackUsed ? STATIC_URL : intendedSrc;
+  const src = isWalking ? WALKING_URL : STATIC_URL;
 
   return (
     <div
@@ -51,10 +38,8 @@ export function CatAvatar({
       }}
     >
       <img
-        key={src}
         src={src}
         alt="Cat"
-        onError={handleError}
         style={{
           width: "100%",
           height: "100%",
