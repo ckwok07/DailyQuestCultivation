@@ -12,6 +12,37 @@ const PAN_LIMIT = 120;
 /** Cat walkable area = red overlay = full floor face. Same bounds everywhere. */
 const FLOOR_HALF = CUBE_SIZE / 2; // ±this in floor x,z = red overlay extent
 
+/** Floor placement grid: every cell is a hitbox for one item */
+const FLOOR_GRID_COLS = 8;
+const FLOOR_GRID_ROWS = 8;
+
+/** Wall placement grid: each wall has a grid of anchor cells (same hitbox idea as floor) */
+const WALL_GRID_COLS = 4;
+const WALL_GRID_ROWS = 4;
+
+/** Floor cell center in floor space (x, z) for a given grid (col, row) */
+function floorCellCenter(col: number, row: number): { x: number; z: number } {
+  const step = (2 * FLOOR_HALF) / FLOOR_GRID_COLS;
+  return {
+    x: -FLOOR_HALF + (col + 0.5) * step,
+    z: -FLOOR_HALF + (row + 0.5) * step,
+  };
+}
+
+/** All wall anchor IDs for left wall then right wall (for placement/API) */
+export const WALL_ANCHOR_IDS: string[] = [
+  ...Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+    const row = Math.floor(i / WALL_GRID_COLS);
+    const col = i % WALL_GRID_COLS;
+    return `wall-left-${row}-${col}`;
+  }),
+  ...Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+    const row = Math.floor(i / WALL_GRID_COLS);
+    const col = i % WALL_GRID_COLS;
+    return `wall-right-${row}-${col}`;
+  }),
+];
+
 /** Depth for perspective */
 const DEPTH_MIN = -CUBE_SIZE;
 const DEPTH_MAX = CUBE_SIZE;
@@ -346,6 +377,41 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               }}
               aria-hidden
             />
+            {/* Floor grid: every cell is a hitbox for placement (edit mode) */}
+            {editMode && (
+              <div
+                style={{
+                  position: "absolute",
+                  width: CUBE_SIZE,
+                  height: CUBE_SIZE,
+                  transform: `rotateX(90deg) translateZ(-${CUBE_SIZE / 2}px)`,
+                  transformOrigin: "center center",
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${FLOOR_GRID_COLS}, 1fr)`,
+                  gridTemplateRows: `repeat(${FLOOR_GRID_ROWS}, 1fr)`,
+                  pointerEvents: "auto",
+                }}
+                aria-hidden
+              >
+                {Array.from({ length: FLOOR_GRID_ROWS * FLOOR_GRID_COLS }, (_, i) => {
+                  const row = Math.floor(i / FLOOR_GRID_COLS);
+                  const col = i % FLOOR_GRID_COLS;
+                  return (
+                    <div
+                      key={`floor-${row}-${col}`}
+                      data-floor-cell-id={`floor-${row}-${col}`}
+                      data-floor-col={col}
+                      data-floor-row={row}
+                      style={{
+                        border: "1px solid rgba(255,255,255,0.35)",
+                        boxSizing: "border-box",
+                        cursor: "pointer",
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
             <div
               style={{
                 position: "absolute",
@@ -357,7 +423,39 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
                 transformOrigin: "center center",
               }}
               aria-hidden
-            />
+            >
+              {/* Wall-left grid: every cell is a hitbox for placement (edit mode) */}
+              {editMode && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
+                    gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
+                    pointerEvents: "auto",
+                  }}
+                  aria-hidden
+                >
+                  {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+                    const row = Math.floor(i / WALL_GRID_COLS);
+                    const col = i % WALL_GRID_COLS;
+                    const anchorId = `wall-left-${row}-${col}`;
+                    return (
+                      <div
+                        key={anchorId}
+                        data-wall-anchor-id={anchorId}
+                        style={{
+                          border: "1px solid rgba(255,255,255,0.4)",
+                          boxSizing: "border-box",
+                          cursor: "pointer",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div
               style={{
                 position: "absolute",
@@ -369,7 +467,39 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
                 transformOrigin: "center center",
               }}
               aria-hidden
-            />
+            >
+              {/* Wall-right grid: every cell is a hitbox for placement (edit mode) */}
+              {editMode && (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${WALL_GRID_COLS}, 1fr)`,
+                    gridTemplateRows: `repeat(${WALL_GRID_ROWS}, 1fr)`,
+                    pointerEvents: "auto",
+                  }}
+                  aria-hidden
+                >
+                  {Array.from({ length: WALL_GRID_ROWS * WALL_GRID_COLS }, (_, i) => {
+                    const row = Math.floor(i / WALL_GRID_COLS);
+                    const col = i % WALL_GRID_COLS;
+                    const anchorId = `wall-right-${row}-${col}`;
+                    return (
+                      <div
+                        key={anchorId}
+                        data-wall-anchor-id={anchorId}
+                        style={{
+                          border: "1px solid rgba(255,255,255,0.4)",
+                          boxSizing: "border-box",
+                          cursor: "pointer",
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {(() => {
