@@ -1,9 +1,13 @@
 "use client";
 
+import { useCallback, useRef, useState } from "react";
 import { CatAvatar } from "./CatAvatar";
 import type { RoomLayoutItem } from "@/types/user";
 
 const CUBE_SIZE = 256;
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 2;
+const PAN_LIMIT = 120;
 
 type IsometricRoomProps = {
   editMode?: boolean;
@@ -11,17 +15,74 @@ type IsometricRoomProps = {
 };
 
 export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps) {
-    return (
+  const [scale, setScale] = useState(1);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const lastMouseRef = useRef({ x: 0, y: 0 });
+
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setScale((s) => clamp(s + delta, MIN_SCALE, MAX_SCALE));
+    },
+    []
+  );
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    setIsDragging(true);
+    lastMouseRef.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - lastMouseRef.current.x;
+      const dy = e.clientY - lastMouseRef.current.y;
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      setOffsetX((x) => clamp(x + dx, -PAN_LIMIT, PAN_LIMIT));
+      setOffsetY((y) => clamp(y + dy, -PAN_LIMIT, PAN_LIMIT));
+    },
+    [isDragging]
+  );
+
+  const handleMouseUp = useCallback(() => setIsDragging(false), []);
+  const handleMouseLeave = useCallback(() => setIsDragging(false), []);
+
+  return (
+    <div
+      className={`cat-space-area${editMode ? " edit-mode" : ""}`}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1rem",
+        position: "relative",
+        userSelect: "none",
+        cursor: isDragging ? "grabbing" : "grab",
+      }}
+      onWheel={handleWheel}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseLeave}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <div
-        className={`cat-space-area${editMode ? " edit-mode" : ""}`}
         style={{
-          overflow: "hidden",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          padding: "1rem",
-          minHeight: 320,
-          position: "relative",
+          transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`,
+          transformOrigin: "center center",
+          transition: isDragging ? "none" : "transform 0.05s ease-out",
         }}
       >
         <div
@@ -55,7 +116,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               }}
               aria-hidden
             />
-            
             {/* Left wall */}
             <div
               style={{
@@ -69,7 +129,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               }}
               aria-hidden
             />
-            
             {/* Back wall */}
             <div
               style={{
@@ -87,5 +146,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         </div>
         <CatAvatar />
       </div>
-    );
-  }
+    </div>
+  );
+}

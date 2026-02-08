@@ -27,8 +27,11 @@ export default function Home() {
       <section
         style={{
           flex: 1,
+          display: "flex",
+          flexDirection: "column",
           padding: "1.5rem",
           minWidth: 280,
+          minHeight: 0,
         }}
       >
         <IsometricRoom editMode={catSpaceEditMode} roomLayout={roomLayout} />

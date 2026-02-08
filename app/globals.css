@@ -34,7 +34,6 @@ h1, h2, .heading-serif { font-family: Georgia, serif; font-weight: 600; color: v
 .cat-space-area {
   background: var(--cat-space-bg);
   border-radius: var(--radius);
-  min-height: 320px;
   display: flex;
   align-items: center;
   justify-content: center;
