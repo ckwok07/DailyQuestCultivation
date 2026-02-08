@@ -12,10 +12,7 @@ const PROMPTS: string[] = [
   "Say yes to plans that you wouldn't usually say yes to",
   "Try a new restaurant or food",
   "Pet to a stranger's dog/cat",
-  "Smile at a baby",
-  ""
-
-  
+  "Smile at a baby"
 ];
 
 /** Simple numeric hash of a string so the same date always yields the same index. */

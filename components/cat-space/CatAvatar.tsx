@@ -2,13 +2,16 @@
 
 import { useEffect, useState } from "react";
 
+const WALKING_URL = "/resources/walking.gif";
+const STATIC_URL = "/resources/cat-static.png";
+
 type CatAvatarProps = {
   /** Screen offset from center (px) — floor position projected to 2D */
   screenX?: number;
   screenY?: number;
   /** Scale for perspective (larger near front, smaller at back) */
   scale?: number;
-  /** Whether the cat is walking or idle */
+  /** Whether the cat is walking or idle (not moving) */
   isWalking?: boolean;
 };
 
@@ -19,22 +22,18 @@ export function CatAvatar({
   scale = 1,
   isWalking = true,
 }: CatAvatarProps) {
-  // Walking: walking.gif; idle: idle.gif (fallback to cat-static.png if missing)
-  const [idleFailed, setIdleFailed] = useState(false);
+  const intendedSrc = isWalking ? WALKING_URL : STATIC_URL;
+  const [fallbackUsed, setFallbackUsed] = useState(false);
 
   useEffect(() => {
-    if (isWalking) setIdleFailed(false);
+    if (isWalking) setFallbackUsed(false);
   }, [isWalking]);
 
-  const displayUrl = isWalking
-    ? "/resources/walking.gif"
-    : idleFailed
-      ? "/resources/cat-static.png"
-      : "/resources/idle.gif";
-
   const handleError = () => {
-    if (!isWalking) setIdleFailed(true);
+    setFallbackUsed(true);
   };
+
+  const src = fallbackUsed ? STATIC_URL : intendedSrc;
 
   return (
     <div
@@ -52,15 +51,15 @@ export function CatAvatar({
       }}
     >
       <img
-        key={displayUrl}
-        src={displayUrl}
+        key={src}
+        src={src}
         alt="Cat"
         onError={handleError}
-        style={{ 
-          width: "100%", 
-          height: "100%", 
+        style={{
+          width: "100%",
+          height: "100%",
           objectFit: "contain",
-          imageRendering: "pixelated", // For crisp pixel art
+          imageRendering: "pixelated",
         }}
       />
     </div>

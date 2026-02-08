@@ -26,6 +26,8 @@ const STOP_DURATION_MAX = 2000;
 const MOVEMENT_SPEED = 0.5;
 const TARGET_REACHED_THRESHOLD = 3;
 const MIN_TARGET_DISTANCE = 60;
+/** Speed below this → show static cat; at or above → walking.gif */
+const WALK_SPEED_THRESHOLD = 0.2;
 
 /** Project floor (x, z) to screen offset */
 function floorToScreen(
@@ -113,6 +115,7 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
   const [catFloorX, setCatFloorX] = useState<number>(0);
   const [catFloorZ, setCatFloorZ] = useState<number>(0);
   const [isWalking, setIsWalking] = useState(true);
+  const [catSpeed, setCatSpeed] = useState(0);
   
   const targetRef = useRef({ x: 0, z: 0 });
   const hasTargetRef = useRef(false);
@@ -167,7 +170,8 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
       }, duration);
     } else {
       setIsWalking((current) => {
-        const nextState = !current;
+        // ~83% idle, ~17% walking in walk-stop mode (adds ~10% overall idle chance)
+        const nextState = Math.random() < 0.17;
         const duration = nextState 
           ? randomBetween(WALK_DURATION_MIN, WALK_DURATION_MAX)
           : randomBetween(STOP_DURATION_MIN, STOP_DURATION_MAX);
@@ -193,46 +197,51 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               targetRef.current = newTarget;
               hasTargetRef.current = true;
             }
-  
+
             const dx = targetRef.current.x - currentX;
             const dz = targetRef.current.z - currentZ;
             const distance = Math.sqrt(dx * dx + dz * dz);
-  
+
             // If reached target, mark as no target
             if (distance < TARGET_REACHED_THRESHOLD) {
               hasTargetRef.current = false;
+              setCatSpeed(0);
               return currentZ;
             }
-  
+
             // Move towards target
             const moveZ = (dz / distance) * MOVEMENT_SPEED;
-            
+
             // Ensure we don't overshoot
             if (distance < MOVEMENT_SPEED) {
+              setCatSpeed(0);
               return targetRef.current.z;
             }
-            
+
+            setCatSpeed(MOVEMENT_SPEED);
             return currentZ + moveZ;
           });
-  
+
           const dx = targetRef.current.x - currentX;
           const dz = targetRef.current.z - catFloorZ;
           const distance = Math.sqrt(dx * dx + dz * dz);
-  
+
           if (distance < TARGET_REACHED_THRESHOLD) {
             return currentX;
           }
-  
+
           const moveX = (dx / distance) * MOVEMENT_SPEED;
-          
+
           if (distance < MOVEMENT_SPEED) {
             return targetRef.current.x;
           }
-  
+
           return currentX + moveX;
         });
+      } else {
+        setCatSpeed(0);
       }
-  
+
       animationFrameRef.current = requestAnimationFrame(animate);
     };
   
@@ -383,12 +392,13 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
         </div>
         {(() => {
           const { x, y, scale } = floorToScreen(catFloorX, catFloorZ);
+          const useWalkingSprite = catSpeed >= WALK_SPEED_THRESHOLD;
           return (
             <CatAvatar
               screenX={x}
               screenY={y}
               scale={scale}
-              isWalking={isWalking}
+              isWalking={useWalkingSprite}
             />
           );
         })()}
