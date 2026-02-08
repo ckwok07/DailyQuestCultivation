@@ -909,11 +909,14 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
           ))}
           {selectedPlacedIndex !== null && (
             <>
+              <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.75)" }}>
+                Click empty spot to move
+              </span>
               <button
                 type="button"
                 onClick={() => removePlacedItem(selectedPlacedIndex)}
                 style={{
-                  marginLeft: "0.5rem",
+                  marginLeft: "auto",
                   padding: "0.35rem 0.6rem",
                   borderRadius: 6,
                   border: "1px solid rgba(255,100,100,0.6)",
@@ -925,9 +928,6 @@ export function IsometricRoom({ editMode, roomLayout = [] }: IsometricRoomProps)
               >
                 Remove
               </button>
-              <span style={{ fontSize: "0.7rem", color: "rgba(255,255,255,0.75)" }}>
-                Click empty spot to move
-              </span>
             </>
           )}
           {selectedFurnitureId && selectedPlacedIndex === null && (
